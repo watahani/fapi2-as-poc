@@ -1,10 +1,17 @@
 # OpenID Conformance Suite on Kubernetes — for the in-sandbox k3s (the
 # devcontainer has NO docker daemon; k3s is the local container runtime).
-# Uses PREBUILT images pulled from the registry (no per-run build). k3s pulls
-# from ghcr.io / docker.io which are on the sandbox egress allowlist.
 #
-# Apply with deploy/conformance/run-local.sh. Images are produced once by
-# .github/workflows/conformance-image.yml. Pin tags/digests in P3.
+# Images are built once by .github/workflows/conformance-image.yml. They are
+# PRIVATE on GHCR and the sandbox gh token has no packages scope, so instead of
+# pulling we IMPORT the workflow's tarball artifacts into k3s containerd:
+#   gh run download <run-id> -n conformance-suite-images -D /tmp/cf
+#   zcat /tmp/cf/conformance-suite-server.tar.gz | sudo k3s ctr images import -
+#   zcat /tmp/cf/conformance-suite-httpd.tar.gz  | sudo k3s ctr images import -
+# Hence imagePullPolicy: IfNotPresent (use the locally-imported image).
+#
+# Apply with deploy/conformance/run-local.sh.
+# NOTE: in-sandbox k3s currently needs --snapshotter=fuse-overlayfs (see
+# scripts/dev-cluster.sh) or the node will not register.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -46,8 +53,9 @@ spec:
     spec:
       containers:
         - name: server
-          # TODO(P3): pin by digest. Built by conformance-image.yml.
-          image: ghcr.io/OWNER/conformance-suite-server:pinned
+          # Built by conformance-image.yml, imported into k3s via ctr (above).
+          image: ghcr.io/watahani/conformance-suite-server:pinned
+          imagePullPolicy: IfNotPresent
           env:
             - { name: MONGODB_HOST, value: mongodb }
           ports: [{ containerPort: 8080 }]
@@ -72,7 +80,8 @@ spec:
     spec:
       containers:
         - name: httpd
-          image: ghcr.io/OWNER/conformance-suite-httpd:pinned
+          image: ghcr.io/watahani/conformance-suite-httpd:pinned
+          imagePullPolicy: IfNotPresent
           ports: [{ containerPort: 8443 }]
 ---
 apiVersion: v1

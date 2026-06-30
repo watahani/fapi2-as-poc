@@ -1,14 +1,22 @@
 name: conformance-image
 
-# Build the OpenID Conformance Suite images ONCE and push to GHCR so CI and
-# local runs only PULL them (no per-run Gradle build). Run rarely: manually or
-# on a schedule when bumping the pinned upstream version.
+# Build the OpenID Conformance Suite images ONCE and make them available so CI
+# and local runs only consume them (no per-run Gradle/Maven build). Two outputs:
+#   1) GHCR push  — ghcr.io/<owner>/conformance-suite-{server,httpd}:{pinned,<ref>}
+#                   (used by the CI compose path; GITHUB_TOKEN can pull these).
+#   2) Artifacts  — docker-saved tarballs uploaded as workflow artifacts, so the
+#                   devcontainer sandbox (no Docker, no GHCR pull creds) can
+#                   `gh run download` them and `ctr import` into k3s.
+#
+# Build strategy: clone upstream at a pinned release and build via UPSTREAM'S
+# OWN docker compose definition, with an override that names the images for us.
+# This avoids hard-coding upstream's internal Dockerfile paths/build steps.
 on:
   workflow_dispatch:
     inputs:
       suite_ref:
-        description: "conformance-suite upstream tag/ref to build"
-        default: "master"
+        description: "conformance-suite tag/ref to build ('auto' = latest release-v*)"
+        default: "auto"
   schedule:
     - cron: "0 3 1 * *" # monthly
 
@@ -18,16 +26,38 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ${{ github.repository_owner }}/conformance-suite
+  UPSTREAM: https://gitlab.com/openid/conformance-suite.git
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout upstream conformance suite (GitLab)
+      - name: Resolve owner (lowercase) and ref
+        id: vars
         run: |
-          git clone --depth 1 --branch "${{ inputs.suite_ref || 'master' }}" \
-            https://gitlab.com/openid/conformance-suite.git suite
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "owner=$owner" >> "$GITHUB_OUTPUT"
+          ref="${{ github.event.inputs.suite_ref }}"
+          if [ -z "$ref" ] || [ "$ref" = "auto" ]; then
+            ref=$(git ls-remote --tags --refs "$UPSTREAM" 'release-v*' \
+                  | sed 's#.*refs/tags/##' | sort -V | tail -1)
+          fi
+          [ -n "$ref" ] || { echo "could not resolve upstream ref" >&2; exit 1; }
+          # Sanitize for use as a docker tag (no '/').
+          tag=$(echo "$ref" | tr '/' '-')
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Building upstream ref: $ref (tag: $tag)"
+
+      - name: Clone upstream conformance suite
+        run: git clone --depth 1 --branch "${{ steps.vars.outputs.ref }}" "$UPSTREAM" suite
+
+      - name: Inspect upstream build layout (debug)
+        working-directory: suite
+        run: |
+          echo "::group::top-level"; ls -la; echo "::endgroup::"
+          echo "::group::compose services"; docker compose config --services 2>&1 || true; echo "::endgroup::"
+          echo "::group::Dockerfiles"; ls -la Dockerfile* httpd/ 2>&1 || true; echo "::endgroup::"
 
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -36,18 +66,45 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # TODO(P3): upstream may require a Gradle/Maven build before the image
-      # build (jar into ./target). Finalize exact build steps per upstream docs.
-      - name: Build & push server image
-        uses: docker/build-push-action@v6
-        with:
-          context: suite/server-dev
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-server:${{ inputs.suite_ref || 'master' }}
+      - name: Write image-naming override
+        run: |
+          P="${{ env.REGISTRY }}/${{ steps.vars.outputs.owner }}/conformance-suite"
+          # Upstream services are: mongodb, server, nginx (the reverse proxy on
+          # :8443). We keep our downstream image name "-httpd" for the proxy.
+          cat > suite/ci-images.yml <<YAML
+          services:
+            server:
+              image: ${P}-server:${{ steps.vars.outputs.tag }}
+            nginx:
+              image: ${P}-httpd:${{ steps.vars.outputs.tag }}
+          YAML
+          cat suite/ci-images.yml
 
-      - name: Build & push httpd image
-        uses: docker/build-push-action@v6
+      - name: Build suite images (upstream compose + our naming)
+        working-directory: suite
+        run: docker compose -f docker-compose.yml -f ci-images.yml build server nginx
+
+      - name: Tag :pinned aliases and push to GHCR
+        run: |
+          P="${{ env.REGISTRY }}/${{ steps.vars.outputs.owner }}/conformance-suite"
+          for img in server httpd; do
+            src="${P}-${img}:${{ steps.vars.outputs.tag }}"
+            docker tag "$src" "${P}-${img}:pinned"
+            docker push "$src"
+            docker push "${P}-${img}:pinned"
+          done
+
+      - name: Export images as artifacts (for k3s import in the sandbox)
+        run: |
+          P="${{ env.REGISTRY }}/${{ steps.vars.outputs.owner }}/conformance-suite"
+          mkdir -p out
+          docker save "${P}-server:pinned" | gzip > out/conformance-suite-server.tar.gz
+          docker save "${P}-httpd:pinned"  | gzip > out/conformance-suite-httpd.tar.gz
+          echo "${{ steps.vars.outputs.ref }}" > out/SUITE_REF.txt
+          ls -lh out
+
+      - uses: actions/upload-artifact@v4
         with:
-          context: suite/nginx
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-httpd:${{ inputs.suite_ref || 'master' }}
+          name: conformance-suite-images
+          path: out/
+          retention-days: 7

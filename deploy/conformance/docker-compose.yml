@@ -14,14 +14,14 @@ services:
       - mongo-data:/data/db
 
   server:
-    image: ${CONFORMANCE_SERVER_IMAGE:-ghcr.io/OWNER/conformance-suite-server:pinned}
+    image: ${CONFORMANCE_SERVER_IMAGE:-ghcr.io/watahani/conformance-suite-server:pinned}
     depends_on: [mongodb]
     environment:
       MONGODB_HOST: mongodb
     restart: unless-stopped
 
   httpd:
-    image: ${CONFORMANCE_HTTPD_IMAGE:-ghcr.io/OWNER/conformance-suite-httpd:pinned}
+    image: ${CONFORMANCE_HTTPD_IMAGE:-ghcr.io/watahani/conformance-suite-httpd:pinned}
     depends_on: [server]
     ports:
       - "8443:8443"
