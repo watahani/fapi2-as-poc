@@ -102,6 +102,9 @@ jj git push --bookmark feature/p1-par      # push → PR を作成
 ## 5. 既知の注意点
 
 - **k3s は privileged 必須**（in-sandbox / DinD なし）。コンテナを信頼境界とみなす設計（host 隔離 + egress 制限済み）。起動不可ならフォールバック（サンドボックス内 postgres プロセス + Helm 静的検証）を docs/GOALS §9 で相談。
+- **in-sandbox k3s の snapshotter**：overlayfs-on-overlayfs が不可（`failed to mount overlay: invalid argument`）でノードが登録されない。`scripts/dev-cluster.sh` は `--snapshotter=fuse-overlayfs`（イメージに同梱）で起動するよう修正済み。**注意：起動中の k3s は root 所有で、`sudo` は `k3s/nerdctl/ctr/init-firewall.sh` のみ NOPASSWD のため `pkill` 不可＝再起動できない**。誤った snapshotter で起動済みの場合はコンテナ rebuild でリセット。kubeconfig は `sudo k3s kubectl config view --raw` で取得（`sudo cat` はパスワードを要求し不可）。
+- **Conformance Suite イメージ**：`conformance-image.yml` が upstream `release-v5.1.45` を GitHub Actions でビルド→`ghcr.io/watahani/conformance-suite-{server,httpd}:pinned`（**現状 private**）へ push、かつ tarball を artifact 出力。GHCR を public 化するには packages スコープ付きトークン/UI 操作が必要（gh の現トークンは未付与）。CI（`conformance.yml`）は `GITHUB_TOKEN` で private のまま pull 可。k3s では artifact を `gh run download` → `sudo k3s ctr images import`（`deploy/conformance/k8s/suite.yaml` 参照）。
+- **Conformance 実走状況**：`conformance.yml`（runner）で end-to-end 検証済み＝suite 起動→`run-conformance.sh` が discovery ゲートで `exit 1`（P1 未実装による正当な red）。`PASS` には P1 のエンドポイント実装が必要。
 - **firewall の egress 許可リスト**は `init-firewall.sh` が権威。ドメイン追加時は `managed-settings.json` も更新し `scripts/check-allowlist-sync.sh` を通す（CI でも検査）。解決失敗は必須ドメインのみ FATAL、他は WARN。
 - **migrate の .sql** は tsc が dist にコピーしないため `npm run migrate`（tsx）前提。本番 Job 化は P1。
 - **dev 依存（vitest/esbuild）の audit advisory** は本番イメージに含まれない（multi-stage で prune）。本番依存は脆弱性 0。

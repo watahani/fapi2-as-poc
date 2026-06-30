@@ -36,7 +36,10 @@ Suite は **一度だけビルドして GHCR に publish**（`.github/workflows/
 ## 有効化ステータス
 
 - **Layer 1（in-repo）**: 実装済み・実行可能。`npm run test:conformance` で走り、エンドポイント未実装のため現状 **red**（18 中ほぼ全て fail）。これが「FAPI conformance を実行して失敗する」状態。CI では gated な `conformance.yml` の最初のステップで実行。
-- **Layer 2（external OpenID Suite）**: **雛形（P3 で本有効化）**。AS のプロトコルエンドポイント（PAR/authorize/token/DPoP/JWKS/Discovery）が P1 実装のため、それまで green にならない。加えて sandbox では **(a) docker デーモン無し（k3s のみ）、(b) suite イメージが GHCR 未publish、(c) ビルド元 gitlab.com が egress 許可リスト外** のため、外部 suite の実走は P3（イメージ publish 後）まで保留。ワークフローは当面 `workflow_dispatch`（手動）。
+- **Layer 2（external OpenID Suite）**: **配線完了・runner で実走確認済み**。
+  - **イメージは publish 済み**：`conformance-image.yml` が upstream `release-v5.1.45` を自前 GitHub Actions でビルドし、`ghcr.io/watahani/conformance-suite-{server,httpd}:pinned`（GHCR private）へ push、かつ tarball を artifact 出力。
+  - **runner 実走（`conformance.yml`）で end-to-end 検証済み**：suite イメージを private GHCR から pull → 起動 → `run-conformance.sh` が discovery ゲートで `exit 1`（= P1 未実装による正当な **red**）。`PASS` には P1（PAR/authorize/token/DPoP/JWKS/Discovery）が必要。
+  - **sandbox k3s 実走は当面不可**：in-sandbox k3s は overlayfs-on-overlayfs 不可で `--snapshotter=fuse-overlayfs` が必須（`dev-cluster.sh` 修正済み）だが、起動中 k3s は root 所有・`sudo` が k3s/nerdctl/ctr のみ NOPASSWD のため**再起動できず**、本セッションでは k3s 経路を実走できなかった。コンテナ rebuild で解消。private GHCR は pull 不可なので k3s では artifact tarball を `ctr import` する（`k8s/suite.yaml` 参照）。
 
 ## P3 で確定させる TODO
 

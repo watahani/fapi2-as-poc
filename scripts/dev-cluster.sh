@@ -18,9 +18,14 @@ up() {
     echo "k3s already running"; return 0
   fi
   echo "starting k3s server (traefik/metrics-server disabled)..."
+  # In this nested/WSL2 sandbox the kernel rejects overlayfs-on-overlayfs, so
+  # k3s's embedded containerd cannot use the default "overlayfs" snapshotter
+  # ("failed to mount overlay: invalid argument") and the agent/node never
+  # registers. fuse-overlayfs is installed in the image and works here.
   sudo k3s server \
     --disable traefik \
     --disable metrics-server \
+    --snapshotter fuse-overlayfs \
     --write-kubeconfig-mode 600 \
     >"$K3S_LOG" 2>&1 &
   echo "waiting for kubeconfig..."
@@ -29,7 +34,9 @@ up() {
     sleep 2
   done
   mkdir -p "$(dirname "$KUBECONFIG_DST")"
-  sudo cat /etc/rancher/k3s/k3s.yaml > "$KUBECONFIG_DST"
+  # `sudo cat` is not permitted (sudo is NOPASSWD only for k3s/nerdctl/ctr), so
+  # extract the kubeconfig via the k3s binary itself.
+  sudo k3s kubectl config view --raw > "$KUBECONFIG_DST"
   chmod 600 "$KUBECONFIG_DST"
   echo "waiting for node Ready..."
   kubectl wait --for=condition=Ready node --all --timeout=120s
@@ -37,6 +44,9 @@ up() {
 }
 
 down() {
+  # NOTE: sudo here is NOPASSWD only for k3s/nerdctl/ctr/init-firewall, so
+  # `pkill`/`k3s-killall.sh` need a password and will no-op non-interactively.
+  # If k3s is wedged and cannot be signalled, rebuild the container to reset it.
   echo "stopping k3s..."
   sudo pkill -x k3s || true
   sudo k3s-killall.sh 2>/dev/null || true

@@ -54,9 +54,10 @@
 - **FAPI conformance は 2 レイヤ**（ハーネス `deploy/conformance/`、ワークフロー `conformance.yml`、いずれも `workflow_dispatch` で gated）：
   - **Layer 1（in-repo・常時実行可・Docker 不要）**：`npm run test:conformance`（`vitest.conformance.config.ts` / `test/conformance/`）。AS を `buildApp()` で起動し HTTP で叩いて FAPI2 SP 要件を直接アサート。仕様要件を実行可能テストに落とした高速層で、**P1 エンドポイント未実装の間は red**（TDD ベースライン）。default の `npm test` からは除外（緑ゲートを赤にしない）。
   - **Layer 2（external・P3 で本有効化）**：**AS をサービス起動 → OpenID Conformance Suite を外部から当てる**（参考は [eudiplo](https://github.com/openwallet-foundation/eudiplo) の e2e/conformance CI 構成のみ）。FAPI 2.0 SP + DPoP + private_key_jwt のプランを回す。
-    - **Suite は毎回ビルドしない**：`conformance-image.yml`（たまに実行）で一度ビルドし GHCR(public) に publish → **CI もローカルも pull だけ**。
-    - 実行：**ローカル（サンドボックスは Docker 無し）= `deploy/conformance/run-local.sh`（k3s に apply）**、**CI = `conformance.yml`（compose で pull&up）**。
-    - sandbox 実走は (a) docker 無し / (b) suite イメージ GHCR 未publish / (c) ビルド元 gitlab.com が egress 許可リスト外、により **P3（イメージ publish 後）まで保留**。
+    - **Suite は毎回ビルドしない**：`conformance-image.yml`（たまに実行）が upstream `release-v5.1.45` をビルドし `ghcr.io/<owner>/conformance-suite-{server,httpd}:pinned`（**現状 private**）へ push＋tarball artifact 出力 → **pull/import だけ**。public 化は packages スコープ付きトークン/UI 操作が必要。
+    - 実行：**CI = `conformance.yml`（runner で compose pull&up、`GITHUB_TOKEN` で private pull・end-to-end 検証済み）**、**サンドボックス = `deploy/conformance/run-local.sh`（k3s に apply、artifact を `ctr import`）**。
+    - **in-sandbox k3s は `--snapshotter=fuse-overlayfs` 必須**（overlayfs 不可、`dev-cluster.sh` 修正済み）。起動中 k3s は再起動不可（sudo 制約）なので誤起動時はコンテナ rebuild。
+    - 現状 runner で suite 起動→discovery ゲートで red を確認。`PASS` は P1 エンドポイント実装後。
 - **CI が赤なら緑になるまで修正を反復**（CI ループ）。conformance green を P0 一行ゴールの達成条件とする。
 
 ## このファイルの保守
