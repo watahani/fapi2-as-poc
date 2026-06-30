@@ -6,7 +6,9 @@
 # NOTE: tool binaries (kubectl/helm/k3s/nerdctl) are downloaded at BUILD time,
 # i.e. before the runtime firewall applies. The firewall only constrains
 # runtime egress.
-FROM node:24-bookworm@sha256:fdddfb3e688158251943d52eba361de991548f6814007acba4917ae6b512d6be
+# Debian trixie base: ships git 2.47 (jj requires git >= 2.41; bookworm's 2.39
+# is too old and breaks `jj git fetch` with "unrecognized option: porcelain").
+FROM node:24-trixie@sha256:5ac1f09047e215d1e4df7fbdf95ff86ca14a35632380b6672d6c9c62d5ac3800
 
 ARG KUBECTL_VERSION=v1.31.4
 ARG HELM_VERSION=v3.16.3
@@ -48,6 +50,15 @@ RUN curl -fsSLo /usr/local/bin/k3s \
       "https://github.com/k3s-io/k3s/releases/download/${K3S_VERSION}/k3s$( [ "${TARGETARCH}" = "arm64" ] && echo "-arm64" )" \
     && chmod +x /usr/local/bin/k3s
 
+# Pre-load k3s system images (pause/coredns/etc.). k3s auto-imports tarballs in
+# /var/lib/rancher/k3s/agent/images/ at startup, so Pod sandboxes can be created
+# WITHOUT pulling from docker.io at runtime (Docker Hub moved blob delivery to a
+# CloudFront host with volatile IPs that the egress allowlist can't track well).
+# Build-time download — the runtime firewall is not yet applied.
+RUN mkdir -p /var/lib/rancher/k3s/agent/images \
+    && curl -fsSL "https://github.com/k3s-io/k3s/releases/download/${K3S_VERSION}/k3s-airgap-images-${TARGETARCH}.tar.gz" \
+       -o /var/lib/rancher/k3s/agent/images/k3s-airgap.tar.gz
+
 # nerdctl (full bundle: nerdctl + buildkit + containerd) for building the app
 # image without a docker daemon, then `ctr images import` into k3s.
 RUN curl -fsSL "https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-full-${NERDCTL_VERSION}-linux-${TARGETARCH}.tar.gz" \
@@ -71,10 +82,12 @@ RUN npm install -g @anthropic-ai/claude-code@latest
 RUN mkdir -p /etc/claude-code
 COPY managed-settings.json /etc/claude-code/managed-settings.json
 
-# Firewall script + passwordless sudo only for it (and k3s startup needs root).
+# Firewall + cgroup-init scripts + passwordless sudo only for them (k3s startup
+# needs root, and cgroup v2 nesting must be set up as root before k3s starts).
 COPY init-firewall.sh /usr/local/bin/init-firewall.sh
-RUN chmod +x /usr/local/bin/init-firewall.sh \
-    && echo "node ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh, /usr/local/bin/k3s, /usr/local/bin/nerdctl, /usr/local/bin/ctr" \
+COPY k3s-cgroup-init.sh /usr/local/bin/k3s-cgroup-init.sh
+RUN chmod +x /usr/local/bin/init-firewall.sh /usr/local/bin/k3s-cgroup-init.sh \
+    && echo "node ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh, /usr/local/bin/k3s-cgroup-init.sh, /usr/local/bin/k3s, /usr/local/bin/nerdctl, /usr/local/bin/ctr" \
       > /etc/sudoers.d/sandbox \
     && chmod 0440 /etc/sudoers.d/sandbox
 

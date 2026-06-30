@@ -51,6 +51,11 @@ spec:
   template:
     metadata: { labels: { app: server } }
     spec:
+      # k8s injects Docker-links-style env vars ({SVCNAME}_PORT=tcp://ip:port)
+      # for every Service in the namespace. The `server` Service would set
+      # SERVER_PORT=tcp://…:8080, which Spring Boot reads as `server.port` and
+      # rejects ("Invalid value 'tcp://…' for server.port"). Disable the links.
+      enableServiceLinks: false
       containers:
         - name: server
           # Built by conformance-image.yml, imported into k3s via ctr (above).
@@ -58,6 +63,16 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - { name: MONGODB_HOST, value: mongodb }
+            # devmode = local admin auth without external Google/GitLab OIDC
+            # (matches upstream docker-compose). startredir mirrors it too.
+            - { name: JAVA_EXTRA_ARGS, value: "-Dfintechlabs.devmode=true -Dfintechlabs.startredir=true" }
+            # The entrypoint always wires google/gitlab OIDC registrations from
+            # these; Spring rejects empty client-ids, so give harmless dummies
+            # (unused in devmode).
+            - { name: OIDC_GOOGLE_CLIENTID, value: "dummy" }
+            - { name: OIDC_GOOGLE_SECRET, value: "dummy" }
+            - { name: OIDC_GITLAB_CLIENTID, value: "dummy" }
+            - { name: OIDC_GITLAB_SECRET, value: "dummy" }
           ports: [{ containerPort: 8080 }]
 ---
 apiVersion: v1

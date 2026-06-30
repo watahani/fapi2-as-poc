@@ -57,7 +57,10 @@ jobs:
         run: |
           echo "::group::top-level"; ls -la; echo "::endgroup::"
           echo "::group::compose services"; docker compose config --services 2>&1 || true; echo "::endgroup::"
-          echo "::group::Dockerfiles"; ls -la Dockerfile* httpd/ 2>&1 || true; echo "::endgroup::"
+          echo "::group::docker-compose.yml"; cat docker-compose.yml 2>&1 || true; echo "::endgroup::"
+          echo "::group::builder-compose.yml"; cat builder-compose.yml 2>&1 || echo "(none)"; echo "::endgroup::"
+          echo "::group::Dockerfile"; cat Dockerfile 2>&1 || true; echo "::endgroup::"
+          echo "::group::httpd/nginx dirs"; ls -la httpd nginx 2>&1 || true; echo "::endgroup::"
 
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -80,9 +83,36 @@ jobs:
           YAML
           cat suite/ci-images.yml
 
-      - name: Build suite images (upstream compose + our naming)
+      # The server image COPYs a pre-built jar from target/; upstream produces it
+      # via a separate maven "builder" (builder-compose.yml). Without this the
+      # server image ships no jar and defaults to `jshell`. Run the builder if
+      # present; fall back to a Maven container build of target/.
+      - name: Build the conformance-suite jar (maven)
         working-directory: suite
-        run: docker compose -f docker-compose.yml -f ci-images.yml build server nginx
+        run: |
+          if [ -f builder-compose.yml ]; then
+            docker compose -f builder-compose.yml run --rm builder
+          else
+            docker run --rm -v "$PWD":/usr/src -w /usr/src maven:3-eclipse-temurin-17 \
+              mvn -B -q clean package -DskipTests
+          fi
+          echo "== target/ =="; ls -la target/ 2>&1 || true
+
+      # The compose `server` service builds ./server-dev (a DEV image that
+      # volume-mounts the jar + needs a command) — not self-contained. The real
+      # production server image is the ROOT Dockerfile: it COPYs the freshly
+      # built target/fapi-test-suite.jar and has an env-driven ENTRYPOINT
+      # (BASE_URL / MONGODB_HOST → spring.data.mongodb.uri). Build that directly.
+      - name: Build server image (root Dockerfile — jar baked + entrypoint)
+        working-directory: suite
+        run: |
+          docker build -f Dockerfile \
+            -t "${{ env.REGISTRY }}/${{ steps.vars.outputs.owner }}/conformance-suite-server:${{ steps.vars.outputs.tag }}" .
+
+      # The nginx reverse proxy (:8443) is self-contained; build via compose.
+      - name: Build httpd (nginx) image
+        working-directory: suite
+        run: docker compose -f docker-compose.yml -f ci-images.yml build nginx
 
       - name: Tag :pinned aliases and push to GHCR
         run: |

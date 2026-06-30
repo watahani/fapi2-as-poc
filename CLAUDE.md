@@ -17,6 +17,7 @@
 - **egress ドメインを追加する時は `.devcontainer/init-firewall.sh`（権威）と `.devcontainer/managed-settings.json` の両方を更新**し、`scripts/check-allowlist-sync.sh`（CI でも検査）を通す。
 - ローカル k8s は in-sandbox k3s（単体・DinD なし・privileged）。イメージは nerdctl ビルド → `ctr import`。
 - インストール済みスキル：`backend-patterns` / `coding-standards` / `tdd-workflow` / `security-review`（`.claude/skills/`）。
+- **コンテナ内作業の実務ガイド（落とし穴・手順の集約）：[docs/AGENT_GUIDE.md](docs/AGENT_GUIDE.md)** を必ず参照。
 - **認証の永続化**：`~/.claude`（Claude）と `~/.config/gh`（gh）は名前付きボリュームで rebuild 越しに保持（Dockerfile で node 所有を担保）。
 
 ### GitHub 認証（基本 PAT 不要）
