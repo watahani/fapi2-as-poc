@@ -1,0 +1,6 @@
+apiVersion: v2
+name: auth-server
+description: FAPI 2.0 Security Profile authorization server (scratch implementation)
+type: application
+version: 0.0.1
+appVersion: "0.0.1"

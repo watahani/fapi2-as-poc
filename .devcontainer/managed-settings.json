@@ -1,0 +1,39 @@
+{
+  "//": "Copied into /etc/claude-code/managed-settings.json by the devcontainer Dockerfile. Enforces Claude Code's built-in sandbox as defense-in-depth INSIDE the container only (not on the host). The init-firewall.sh egress allowlist is the PRIMARY/AUTHORITATIVE network control; this `allowedDomains` list MUST be kept in sync with ALLOWED_DOMAINS in .devcontainer/init-firewall.sh.",
+  "sandbox": {
+    "enabled": true,
+    "filesystem": {
+      "denyRead": ["~/.ssh", "~/.aws", "~/.config/gh", "~/.git-credentials"],
+      "denyWrite": ["~/.bashrc", "~/.zshrc", "~/.profile"]
+    },
+    "credentials": {
+      "files": [
+        { "path": "~/.ssh", "mode": "deny" },
+        { "path": "~/.aws/credentials", "mode": "deny" }
+      ]
+    },
+    "allowedDomains": [
+      "api.anthropic.com",
+      "claude.ai",
+      "platform.claude.com",
+      "registry.npmjs.org",
+      "github.com",
+      "api.github.com",
+      "codeload.github.com",
+      "raw.githubusercontent.com",
+      "objects.githubusercontent.com",
+      "www.ietf.org",
+      "datatracker.ietf.org",
+      "www.rfc-editor.org",
+      "openid.net",
+      "www.certification.openid.net",
+      "registry-1.docker.io",
+      "auth.docker.io",
+      "production.cloudflare.docker.com",
+      "ghcr.io",
+      "registry.k8s.io",
+      "get.k3s.io",
+      "get.helm.sh"
+    ]
+  }
+}

@@ -1,0 +1,83 @@
+# OpenID Conformance Suite on Kubernetes — for the in-sandbox k3s (the
+# devcontainer has NO docker daemon; k3s is the local container runtime).
+# Uses PREBUILT images pulled from the registry (no per-run build). k3s pulls
+# from ghcr.io / docker.io which are on the sandbox egress allowlist.
+#
+# Apply with deploy/conformance/run-local.sh. Images are produced once by
+# .github/workflows/conformance-image.yml. Pin tags/digests in P3.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: conformance
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongodb
+  namespace: conformance
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: mongodb } }
+  template:
+    metadata: { labels: { app: mongodb } }
+    spec:
+      containers:
+        - name: mongodb
+          image: mongo:6.0.13
+          ports: [{ containerPort: 27017 }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: mongodb, namespace: conformance }
+spec:
+  selector: { app: mongodb }
+  ports: [{ port: 27017, targetPort: 27017 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server
+  namespace: conformance
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: server } }
+  template:
+    metadata: { labels: { app: server } }
+    spec:
+      containers:
+        - name: server
+          # TODO(P3): pin by digest. Built by conformance-image.yml.
+          image: ghcr.io/OWNER/conformance-suite-server:pinned
+          env:
+            - { name: MONGODB_HOST, value: mongodb }
+          ports: [{ containerPort: 8080 }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: server, namespace: conformance }
+spec:
+  selector: { app: server }
+  ports: [{ port: 8080, targetPort: 8080 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: httpd
+  namespace: conformance
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: httpd } }
+  template:
+    metadata: { labels: { app: httpd } }
+    spec:
+      containers:
+        - name: httpd
+          image: ghcr.io/OWNER/conformance-suite-httpd:pinned
+          ports: [{ containerPort: 8443 }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: httpd, namespace: conformance }
+spec:
+  selector: { app: httpd }
+  ports: [{ port: 8443, targetPort: 8443 }]

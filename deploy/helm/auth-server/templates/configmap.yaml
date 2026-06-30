@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "auth-server.fullname" . }}
+  labels:
+    {{- include "auth-server.labels" . | nindent 4 }}
+data:
+  PORT: {{ .Values.service.port | quote }}
+  ISSUER: {{ .Values.config.issuer | quote }}
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  PDP_KIND: {{ .Values.config.pdpKind | quote }}

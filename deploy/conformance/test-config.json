@@ -1,0 +1,22 @@
+{
+  "//": "FAPI 2.0 SP conformance test config TEMPLATE. Finalize variant + client details in P3 once the AS endpoints exist. Consumed by run-conformance.sh.",
+  "alias": "fapi2-as-poc",
+  "description": "FAPI 2.0 Security Profile (DPoP + private_key_jwt) — AS PoC",
+  "server": {
+    "discoveryUrl": "${ISSUER}/.well-known/openid-configuration"
+  },
+  "client": {
+    "client_id": "conformance-test-client",
+    "scope": "openid",
+    "jwks": {
+      "//": "P3: client private_key_jwt signing JWKS (the suite generates/holds the key)"
+    }
+  },
+  "variant": {
+    "fapi_profile": "plain_fapi",
+    "client_auth_type": "private_key_jwt",
+    "sender_constrain": "dpop",
+    "fapi_request_method": "pushed",
+    "fapi_response_mode": "plain_response"
+  }
+}

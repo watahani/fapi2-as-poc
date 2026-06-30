@@ -1,0 +1,37 @@
+{
+  "name": "FAPI2 AS Secure Sandbox",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  // Mount ONLY the project workspace. The host home dir, ~/.ssh, ~/.aws, etc.
+  // are deliberately NOT mounted -> no host resource access.
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
+  "workspaceFolder": "/workspace",
+  "mounts": [
+    // Persist Claude Code auth/config across rebuilds (named volume, not host FS).
+    "source=claude-code-config-${devcontainerId},target=/home/node/.claude,type=volume",
+    // Persist `gh` CLI auth (gh auth login / device flow) across rebuilds.
+    "source=gh-config-${devcontainerId},target=/home/node/.config/gh,type=volume"
+  ],
+  // privileged is REQUIRED for in-sandbox k3s (embedded containerd, cgroups).
+  // This is accepted because the CONTAINER itself is the trust boundary:
+  // host FS is unmounted and egress is firewalled. NET_ADMIN/NET_RAW are for
+  // the iptables/ipset egress firewall.
+  "runArgs": [
+    "--privileged",
+    "--cap-add=NET_ADMIN",
+    "--cap-add=NET_RAW"
+  ],
+  "containerEnv": {
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+  },
+  "remoteUser": "node",
+  // Apply the egress allowlist firewall before any development starts.
+  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh",
+  "waitFor": "postStartCommand",
+  "customizations": {
+    "vscode": {
+      "extensions": ["dbaeumer.vscode-eslint", "esbenp.prettier-vscode"]
+    }
+  }
+}

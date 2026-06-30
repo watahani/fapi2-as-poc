@@ -1,0 +1,57 @@
+replicaCount: 1
+
+image:
+  repository: auth-server
+  tag: dev
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 3000
+
+# Target production envelope: 1 vCPU / 800MB. requests == limits to mirror the
+# constrained environment under which the 100 RPS goal must hold.
+resources:
+  requests:
+    cpu: "1"
+    memory: 800Mi
+  limits:
+    cpu: "1"
+    memory: 800Mi
+
+config:
+  issuer: https://localhost:3000
+  logLevel: info
+  pdpKind: mock
+
+# Database connection. When postgres.enabled=true the in-cluster postgres
+# service is used and `host` is overridden by the chart.
+database:
+  host: ""
+  port: 5432
+  name: authserver
+  user: authserver
+
+secret:
+  # Empty = the chart reuses the existing Secret's password (helm upgrade) or
+  # generates a random one at install time (no credential committed to VCS).
+  # Set explicitly only when integrating an external/managed DB; for real
+  # environments prefer a sealed/external Secret over this value.
+  databasePassword: ""
+
+# Dev-only in-cluster PostgreSQL (disable to point at an external DB).
+postgres:
+  enabled: true
+  image: postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb
+  storage: 1Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+# NetworkPolicy scaffold for the auth/authz separation (off by default in P0).
+networkPolicy:
+  enabled: false

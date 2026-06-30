@@ -1,0 +1,59 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # Supply-chain gate: production dependencies must have no high+ vulns.
+      - name: Production dependency audit
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Generate SBOM (production deps)
+        run: npm sbom --omit=dev --sbom-format=cyclonedx > sbom.cdx.json
+
+      - uses: azure/setup-helm@v4
+
+      - name: Helm lint
+        run: helm lint deploy/helm/auth-server
+
+      - name: Helm template renders
+        run: helm template as deploy/helm/auth-server -n as > /dev/null
+
+      # Defense-in-depth: firewall and sandbox allowlists must stay identical.
+      - name: Allowlist sync check
+        run: bash scripts/check-allowlist-sync.sh
+
+  # Validate the production image builds and the container starts (liveness).
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build app image
+        run: docker build -t auth-server:ci .
+      - name: Smoke — container starts and /health responds
+        run: |
+          docker run -d --name as -p 3000:3000 \
+            -e DATABASE_URL=postgresql://x:y@127.0.0.1:5432/none auth-server:ci
+          ok=
+          for _ in $(seq 1 20); do curl -sf http://localhost:3000/health && ok=1 && break; sleep 1; done
+          docker logs as
+          [ "$ok" = "1" ]

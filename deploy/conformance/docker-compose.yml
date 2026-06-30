@@ -1,0 +1,31 @@
+# OpenID Conformance Suite from PREBUILT images (no per-run build).
+#
+# USE THIS ONLY ON DOCKER-CAPABLE HOSTS (CI runners, your laptop). The
+# devcontainer sandbox has NO Docker daemon (k3s + containerd, no DinD) — there,
+# use deploy/conformance/run-local.sh which runs the suite on k3s instead.
+#
+# Images are produced once by .github/workflows/conformance-image.yml and just
+# pulled here. Override via CONFORMANCE_SERVER_IMAGE / CONFORMANCE_HTTPD_IMAGE.
+services:
+  mongodb:
+    image: mongo:6.0.13
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+
+  server:
+    image: ${CONFORMANCE_SERVER_IMAGE:-ghcr.io/OWNER/conformance-suite-server:pinned}
+    depends_on: [mongodb]
+    environment:
+      MONGODB_HOST: mongodb
+    restart: unless-stopped
+
+  httpd:
+    image: ${CONFORMANCE_HTTPD_IMAGE:-ghcr.io/OWNER/conformance-suite-httpd:pinned}
+    depends_on: [server]
+    ports:
+      - "8443:8443"
+    restart: unless-stopped
+
+volumes:
+  mongo-data:
