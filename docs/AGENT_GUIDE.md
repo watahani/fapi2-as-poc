@@ -67,3 +67,4 @@ devcontainer 内で作業する Claude Code エージェント向けの実務ガ
 - k3s が Ready にならない → snapshotter（fuse-overlayfs）か、誤起動 → **rebuild**。
 - 通信が失敗する → egress 許可リスト未登録を疑う（上記3点セット）。
 - リビルドで Claude 認証が消える → `~/.claude.json` がボリューム外（symlink が外れている）か、ボリューム所有権が root か。`~/.claude.json -> ~/.claude/claude.json` の symlink と node 所有を確認。gh は `~/.config/gh` 配下が全部ボリュームなので `gh auth login` し直せば永続。
+- `claude update` が権限エラー → claude は **node 所有の `/home/node/.npm-global`**（`NPM_CONFIG_PREFIX`）にインストールされる（Dockerfile）。`/usr/local` への root install だと node が更新できず EACCES。**リビルドしても新版にならない**のは `npm i -g …@latest` レイヤの Docker キャッシュ由来 → 「Rebuild Without Cache」でベイク更新、または起動後に `claude update`（現在は動く）。`/home/node/.npm-global` はボリュームではないので、runtime 更新はリビルドでベイク版へ戻る（永続したい場合は当該ディレクトリをボリューム化）。
