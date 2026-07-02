@@ -17,15 +17,29 @@ up() {
   if pgrep -x k3s >/dev/null 2>&1; then
     echo "k3s already running"; return 0
   fi
+  # cgroup v2 nesting must be set up (as root) right before k3s starts, or runc
+  # cannot create pod-sandbox cgroups. Idempotent; no-op if already delegated.
+  if [ -x /usr/local/bin/k3s-cgroup-init.sh ]; then
+    echo "setting up cgroup v2 nesting..."
+    sudo /usr/local/bin/k3s-cgroup-init.sh || echo "warn: cgroup-init reported an issue" >&2
+  fi
   echo "starting k3s server (traefik/metrics-server disabled)..."
-  # In this nested/WSL2 sandbox the kernel rejects overlayfs-on-overlayfs, so
-  # k3s's embedded containerd cannot use the default "overlayfs" snapshotter
-  # ("failed to mount overlay: invalid argument") and the agent/node never
-  # registers. fuse-overlayfs is installed in the image and works here.
+  # Two sandbox-specific workarounds are required or the node never registers:
+  #  1) --snapshotter fuse-overlayfs: the kernel rejects overlayfs-on-overlayfs
+  #     here ("failed to mount overlay: invalid argument"); fuse-overlayfs is
+  #     installed in the image and works.
+  #  2) --kubelet-arg cgroups-per-qos=false + enforce-node-allocatable=: cgroup
+  #     v2 is in "domain" mode without delegation, so the kubelet cannot create
+  #     /sys/fs/cgroup/kubepods ("cannot enter cgroupv2 ... invalid state").
+  #     Disabling per-QoS cgroup management sidesteps it (fine for a dev cluster).
+  # NOTE: run this via a DETACHED background task; a foreground shell that
+  # backgrounds k3s has its process group reaped on return, killing k3s.
   sudo k3s server \
     --disable traefik \
     --disable metrics-server \
     --snapshotter fuse-overlayfs \
+    --kubelet-arg=cgroups-per-qos=false \
+    --kubelet-arg=enforce-node-allocatable= \
     --write-kubeconfig-mode 600 \
     >"$K3S_LOG" 2>&1 &
   echo "waiting for kubeconfig..."
@@ -38,6 +52,13 @@ up() {
   # extract the kubeconfig via the k3s binary itself.
   sudo k3s kubectl config view --raw > "$KUBECONFIG_DST"
   chmod 600 "$KUBECONFIG_DST"
+  # Wait for the node object to exist first (kubectl wait errors on an empty
+  # set), then for it to become Ready.
+  echo "waiting for node to register..."
+  for _ in $(seq 1 60); do
+    [ -n "$(kubectl get nodes -o name 2>/dev/null)" ] && break
+    sleep 2
+  done
   echo "waiting for node Ready..."
   kubectl wait --for=condition=Ready node --all --timeout=120s
   kubectl get nodes

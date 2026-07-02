@@ -26,8 +26,13 @@
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
   },
   "remoteUser": "node",
-  // Apply the egress allowlist firewall before any development starts.
-  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh",
+  // Order matters: (1) set up cgroup v2 nesting as root BEFORE any k3s start so
+  // runc can create pod-sandbox cgroups; (2) symlink ~/.claude.json (holds the
+  // oauthAccount/userID binding; lives at HOME root, outside the ~/.claude
+  // volume, so it would reset on rebuild and log Claude out even though
+  // ~/.claude/.credentials.json persists); (3) apply the egress allowlist
+  // firewall last (re-applying it while k3s runs would flush pod networking).
+  "postStartCommand": "sudo /usr/local/bin/k3s-cgroup-init.sh; ln -sfn ~/.claude/claude.json ~/.claude.json; sudo /usr/local/bin/init-firewall.sh",
   "waitFor": "postStartCommand",
   "customizations": {
     "vscode": {

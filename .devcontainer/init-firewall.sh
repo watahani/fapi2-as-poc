@@ -47,7 +47,9 @@ ALLOWED_DOMAINS=(
   registry-1.docker.io
   auth.docker.io
   production.cloudflare.docker.com
+  production.cloudfront.docker.com
   ghcr.io
+  pkg-containers.githubusercontent.com
   registry.k8s.io
   get.k3s.io
   get.helm.sh
