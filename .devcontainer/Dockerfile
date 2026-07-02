@@ -75,9 +75,6 @@ RUN JJ_ARCH="$( [ "${TARGETARCH}" = "arm64" ] && echo aarch64 || echo x86_64 )" 
     && chmod +x /usr/local/bin/jj \
     && rm -rf /tmp/jjdl
 
-# Claude Code CLI
-RUN npm install -g @anthropic-ai/claude-code@latest
-
 # Enforce the built-in sandbox (defense-in-depth) only INSIDE this container.
 RUN mkdir -p /etc/claude-code
 COPY managed-settings.json /etc/claude-code/managed-settings.json
@@ -105,9 +102,17 @@ RUN ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> /etc/ssh/ssh_known_hosts 2>/d
 RUN mkdir -p /home/node/.claude /home/node/.config/gh \
     && chown -R node:node /home/node/.claude /home/node/.config
 
-ENV DEVCONTAINER=true \
+ENV NPM_CONFIG_PREFIX=/home/node/.npm-global \
+    PATH=/home/node/.npm-global/bin:$PATH \
+    DEVCONTAINER=true \
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
     KUBECONFIG=/home/node/.kube/config
 
 USER node
+# Claude Code CLI — installed as `node` into a node-owned npm prefix so
+# `claude update` (an npm -g reinstall) works at runtime WITHOUT root, and so
+# its bin is NOT in /usr/local/bin beside the sudo-run scripts (those must stay
+# root-owned to prevent privilege escalation via NOPASSWD sudo).
+RUN mkdir -p /home/node/.npm-global \
+    && npm install -g @anthropic-ai/claude-code@latest
 WORKDIR /workspace
