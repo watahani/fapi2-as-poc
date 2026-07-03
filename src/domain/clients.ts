@@ -44,6 +44,26 @@ const metadataSchema = z
 
 export type ClientMetadata = z.infer<typeof metadataSchema>;
 
+/** Validate registration metadata (used by loadClient and the seeder so a
+ * non-compliant client is rejected at write time, not just read time). */
+export function parseClientMetadata(metadata: unknown): ClientMetadata {
+  const parsed = metadataSchema.safeParse(metadata);
+  if (!parsed.success) {
+    throw new InvalidClientMetadataError(parsed.error.message);
+  }
+  const md = parsed.data;
+  for (const uri of md.redirect_uris) {
+    const u = new URL(uri);
+    if (u.protocol !== "https:" || u.hash !== "") {
+      throw new InvalidClientMetadataError("redirect_uri must be https without fragment [FAPI2 5.3.2.2(8)]");
+    }
+  }
+  if (!md.jwks && !md.jwks_uri) {
+    throw new InvalidClientMetadataError("client needs jwks or jwks_uri for private_key_jwt [RFC7523 §3(9)]");
+  }
+  return md;
+}
+
 export interface Client {
   clientId: string;
   clientName: string | null;
@@ -57,27 +77,7 @@ export async function loadClient(repo: ClientRepository, clientId: string): Prom
   if (!clientId) return null;
   const rec = await repo.findById(clientId);
   if (!rec) return null;
-  const parsed = metadataSchema.safeParse(rec.metadata);
-  if (!parsed.success) {
-    throw new InvalidClientMetadataError(
-      `client ${clientId} has invalid registered metadata: ${parsed.error.message}`,
-    );
-  }
-  const md = parsed.data;
-  // FAPI2-AUTHZ-8: no http redirect URIs (loopback exception unused here).
-  for (const uri of md.redirect_uris) {
-    const u = new URL(uri);
-    if (u.protocol !== "https:" || u.hash !== "") {
-      throw new InvalidClientMetadataError(
-        `client ${clientId} redirect_uri must be https without fragment [FAPI2 5.3.2.2(8)]`,
-      );
-    }
-  }
-  if (!md.jwks && !md.jwks_uri) {
-    throw new InvalidClientMetadataError(
-      `client ${clientId} needs jwks or jwks_uri for private_key_jwt [RFC7523 §3(9)]`,
-    );
-  }
+  const md = parseClientMetadata(rec.metadata);
   return { clientId: rec.clientId, clientName: rec.clientName, metadata: md };
 }
 

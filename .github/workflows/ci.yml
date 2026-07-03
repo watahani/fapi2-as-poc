@@ -41,6 +41,10 @@ jobs:
         env:
           PG_TEST_URL: postgresql://ci:ci@localhost:5432/authserver_test
 
+      # In-repo FAPI 2.0 SP conformance (Layer 1): now green, so it gates CI.
+      - name: FAPI2 conformance (in-repo)
+        run: npm run test:conformance
+
       # Supply-chain gate: production dependencies must have no high+ vulns.
       - name: Production dependency audit
         run: npm audit --omit=dev --audit-level=high
