@@ -276,6 +276,9 @@ export function endpointPaths(config: AppConfig) {
     revocation: `${prefix}/revoke`,
     introspection: `${prefix}/introspect`,
     userinfo: `${prefix}/userinfo`,
+    interaction: `${prefix}/interaction`,
+    interactionLogin: `${prefix}/interaction/login`,
+    interactionConsent: `${prefix}/interaction/consent`,
   } as const;
 }
 

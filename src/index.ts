@@ -10,11 +10,13 @@ import { KeyStore } from "./crypto/keys.js";
 import { registerEndpoints } from "./endpoints/index.js";
 import { MockPdp } from "./authz/adapters/mock.js";
 import type { PolicyDecisionPoint } from "./authz/pdp.js";
+import { DevLoginProvider, type AuthenticationProvider } from "./domain/interaction.js";
 
 export interface AppDeps {
   config?: AppConfig;
   pdp?: PolicyDecisionPoint;
   storage?: Storage;
+  authProvider?: AuthenticationProvider;
 }
 
 /**
@@ -122,7 +124,8 @@ export function buildApp(deps: AppDeps = {}): FastifyInstance {
     };
   });
 
-  registerEndpoints(app, { config, pdp, storage, keystore });
+  const authProvider = deps.authProvider ?? new DevLoginProvider(config);
+  registerEndpoints(app, { config, pdp, storage, keystore, authProvider });
 
   return app;
 }

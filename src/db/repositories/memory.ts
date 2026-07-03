@@ -79,6 +79,15 @@ class MemoryParRequests implements ParRequestRepository {
     this.rows.set(rec.requestUri, { ...structuredClone(rec), consumedAt: null });
   }
 
+  async peek(requestUri: string, now: Date): Promise<ParRequestRecord | null> {
+    const row = this.rows.get(requestUri);
+    if (!row || row.consumedAt !== null || row.expiresAt.getTime() <= now.getTime()) {
+      return null;
+    }
+    const { consumedAt: _consumedAt, ...rec } = row;
+    return structuredClone(rec);
+  }
+
   async consume(requestUri: string, now: Date): Promise<ParRequestRecord | null> {
     const row = this.rows.get(requestUri);
     if (!row || row.consumedAt !== null || row.expiresAt.getTime() <= now.getTime()) {

@@ -24,6 +24,7 @@ import { closePool } from "../../src/db/pool.js";
 import { createMemoryStorage } from "../../src/db/repositories/memory.js";
 import {
   ASSERTION_TYPE,
+  authorizeToCode,
   createDpopKey,
   createTestClient,
   form,
@@ -296,13 +297,8 @@ describe("Token endpoint [RFC 6749, RFC 7523, RFC 9449, RFC 9068]", () => {
     expect(par.statusCode, par.payload).toBe(201);
     const { request_uri } = par.json() as { request_uri: string };
 
-    // Authorize → code (dev interaction).
-    const authz = await inject({
-      method: "GET",
-      url: `/authorize?client_id=${client.clientId}&request_uri=${encodeURIComponent(request_uri)}`,
-    });
-    expect(authz.statusCode).toBe(303);
-    const loc = new URL(String(authz.headers.location));
+    // Authorize → interactive login + consent → code.
+    const loc = await authorizeToCode(app, { requestUri: request_uri, clientId: client.clientId });
     expect(loc.searchParams.get("iss")).toBe(ISSUER); // RFC 9207
     const code = loc.searchParams.get("code")!;
 

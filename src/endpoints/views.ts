@@ -24,13 +24,14 @@ function page(title: string, body: string): string {
 }
 
 export interface LoginView {
+  action: string;
   interactionId: string;
   csrfToken: string;
   users: readonly string[];
   error?: string;
 }
 
-/** Dev login form: pick/enter a username. POSTs to /interaction/login. */
+/** Dev login form: pick/enter a username. POSTs to the login action. */
 export function renderLogin(v: LoginView): string {
   const options = v.users
     .map((u) => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`)
@@ -39,7 +40,7 @@ export function renderLogin(v: LoginView): string {
   return page(
     "Sign in",
     `<main><h1>Sign in (dev)</h1>${err}
-<form method="post" action="/interaction/login">
+<form method="post" action="${escapeHtml(v.action)}">
 <input type="hidden" name="interaction_id" value="${escapeHtml(v.interactionId)}">
 <input type="hidden" name="csrf" value="${escapeHtml(v.csrfToken)}">
 <label>User
@@ -51,6 +52,7 @@ ${v.users.length ? `<select name="username" id="username">${options}</select>` :
 }
 
 export interface ConsentView {
+  action: string;
   interactionId: string;
   csrfToken: string;
   clientName: string;
@@ -67,7 +69,7 @@ export function renderConsent(v: ConsentView): string {
 <p>Signed in as <strong>${escapeHtml(v.subject)}</strong>.</p>
 <p><strong>${escapeHtml(v.clientName)}</strong> is requesting access to:</p>
 <ul>${scopeItems}</ul>
-<form method="post" action="/interaction/consent">
+<form method="post" action="${escapeHtml(v.action)}">
 <input type="hidden" name="interaction_id" value="${escapeHtml(v.interactionId)}">
 <input type="hidden" name="csrf" value="${escapeHtml(v.csrfToken)}">
 <button type="submit" name="decision" value="approve" id="approve">Approve</button>
