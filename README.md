@@ -63,7 +63,11 @@ npm run migrate
 | `PDP_AUTHZEN_URL` | `http://localhost:8080/access/v1/evaluation` | AuthZEN PDP エンドポイント |
 | `PDP_AUTHZEN_TOKEN` | （空） | PDP 呼び出し用トークン |
 | `REDIS_URL` | （空） | キャッシュ（後付け・空=無効） |
-| `EXTERNAL_IDP_URL` | （空） | 認証委譲先 IdP（P2・空=組込み dev interaction） |
+| `SESSION_SECRET` | （空） | ログインセッション/CSRF 署名鍵（HMAC）。本番必須・32 文字以上。空=プロセスごとランダム（dev） |
+| `DEV_LOGIN_USERS` | （空） | 組込み dev ログインで受理する username（カンマ区切り）。本番は外部 IdP（P2.5）へ委譲 |
+| `INTERACTION_TTL_SEC` | `600` | 保留インタラクション（login/consent 進行中）の TTL 秒（最大 3600） |
+| `SESSION_TTL_SEC` | `3600` | ログインセッション cookie の TTL 秒 |
+| `EXTERNAL_IDP_URL` | （空） | 認証委譲先 IdP（P2.5・空=組込み dev interaction） |
 
 ## ディレクトリ構成
 

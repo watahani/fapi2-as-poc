@@ -79,6 +79,26 @@ describe("interaction endpoints", () => {
     expect(String(res.headers["content-type"])).toContain("text/html");
   });
 
+  it("consent page CSP form-action permits the redirect_uri origin [OIDC §3.1.2.3]", async () => {
+    // The approve/deny submission 303-redirects to the client's cross-origin
+    // redirect_uri; browsers re-check that redirect against the submitting
+    // document's form-action, so 'self' alone would silently block it.
+    const { id, loginHtml } = await startInteraction();
+    const loginRes = await app.inject({
+      method: "POST",
+      url: "/interaction/login",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: form({ interaction_id: id, csrf: csrfOf(loginHtml), username: "dev-user" }),
+    });
+    const cookie = String(loginRes.headers["set-cookie"]).split(";")[0];
+    const consent = await app.inject({ method: "GET", url: `/interaction?id=${id}`, headers: { cookie } });
+    expect(consent.statusCode).toBe(200);
+    const csp = String(consent.headers["content-security-policy"]);
+    const origin = new URL(client.redirectUri).origin;
+    expect(csp).toContain(`form-action 'self' ${origin}`);
+    expect(csp).toContain("frame-ancestors 'none'");
+  });
+
   it("rejects login without a valid CSRF token [OIDC §3.1.2.3 / RFC6749 §10.12]", async () => {
     const { id } = await startInteraction();
     const res = await app.inject({

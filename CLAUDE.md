@@ -54,12 +54,12 @@
 - すべての push / PR で **`.github/workflows/ci.yml`**：typecheck / test / 本番依存 audit ゲート / SBOM / helm lint・template / allowlist 同期 / アプリイメージ build smoke。
 - **FAPI conformance は 2 レイヤ**（ハーネス `deploy/conformance/`、ワークフロー `conformance.yml`、いずれも `workflow_dispatch` で gated）：
   - **Layer 1（in-repo・常時実行可・Docker 不要）**：`npm run test:conformance`（`vitest.conformance.config.ts` / `test/conformance/`）。AS を `buildApp()` で in-memory storage（`STORAGE=memory`）起動し HTTP で叩いて FAPI2 SP 要件を直接アサート。**P1 完了で 20/20 green となり `ci.yml` のゲートに昇格済み**（PAR→authorize→token を DPoP + private_key_jwt で end-to-end）。要件 ID は `docs/REQUIREMENTS-P1.md`。default の `npm test`（unit）とは別ステップ。
-  - **Layer 2（external・P3 で本有効化）**：**AS をサービス起動 → OpenID Conformance Suite を外部から当てる**（参考は [eudiplo](https://github.com/openwallet-foundation/eudiplo) の e2e/conformance CI 構成のみ）。FAPI 2.0 SP + DPoP + private_key_jwt のプランを回す。
+  - **Layer 2（external・overall=PASS 達成）**：**AS をサービス起動 → OpenID Conformance Suite を外部から当てる**（参考は [eudiplo](https://github.com/openwallet-foundation/eudiplo) の e2e/conformance CI 構成のみ）。FAPI 2.0 SP + DPoP + private_key_jwt プランを回し、**55 モジュール中 49 PASS / 1 SKIP / 5 想定 non-pass で overall=PASS**。P2 で AS が対話化したため `deploy/conformance/drive-browser.mjs`（Playwright headless）が dev ログイン + consent 承認/拒否をドライブする。**consent フォームの 303 はクライアントの cross-origin redirect_uri へ向かうため、consent ページの CSP `form-action` に当該 redirect_uri origin を許可する**（`src/endpoints/redirect.ts consentCsp`。global の `form-action 'self'` のみだと browser がリダイレクトを阻止）。残る 2 想定 non-pass はハーネス制約（`run-conformance.sh EXPECTED_NONPASS`、理由は同ファイル参照）。
     - **Suite は毎回ビルドしない**：`conformance-image.yml`（たまに実行）が upstream `release-v5.1.45` をビルドし `ghcr.io/<owner>/conformance-suite-{server,httpd}:pinned`（**現状 private**）へ push＋tarball artifact 出力 → **pull/import だけ**。public 化は packages スコープ付きトークン/UI 操作が必要。
     - 実行：**CI = `conformance.yml`（runner で compose pull&up、`GITHUB_TOKEN` で private pull・end-to-end 検証済み）**、**サンドボックス = `deploy/conformance/run-local.sh`（k3s に apply、artifact を `ctr import`）**。
     - **in-sandbox k3s は `--snapshotter=fuse-overlayfs` 必須**（overlayfs 不可、`dev-cluster.sh` 修正済み）。起動中 k3s は再起動不可（sudo 制約）なので誤起動時はコンテナ rebuild。
-    - P1 完了でエンドポイントが揃ったため、次は suite の FAPI2 SP プランを回し browser interaction（authorize リダイレクト）を dev 自動認証で通す配線が残タスク（P3）。
-- **CI が赤なら緑になるまで修正を反復**（CI ループ）。Layer 1 conformance green は達成済み（一行ゴールの Docker 不要層）。最終的な一行ゴール達成条件は Layer 2（外部 suite）green（P3）。
+    - P2 で対話ログイン + consent を実装し、`drive-browser.mjs` が browser interaction をドライブして Layer 2 overall=PASS を達成。次の拡張は外部 IdP フェデレーション（`AuthenticationProvider` の別アダプタ、P2.5）。
+- **CI が赤なら緑になるまで修正を反復**（CI ループ）。Layer 1 conformance green（Docker 不要層）に加え、**Layer 2（外部 suite）も overall=PASS を達成**（一行ゴール達成）。
 
 ## このファイルの保守
 

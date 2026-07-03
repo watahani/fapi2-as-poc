@@ -14,6 +14,7 @@ import { registerToken } from "./token.js";
 import { registerRevoke } from "./revoke.js";
 import { registerIntrospect } from "./introspect.js";
 import { registerUserinfo } from "./userinfo.js";
+import { BASE_CSP } from "./redirect.js";
 import { FixedWindowRateLimiter } from "./rate-limit.js";
 
 export interface EndpointDeps {
@@ -53,10 +54,10 @@ export function registerEndpoints(app: FastifyInstance, input: EndpointDepsInput
   // CORS on the authorization endpoint; not emitting ACAO keeps it same-origin.
   app.addHook("onSend", (_req, reply, payload, done) => {
     reply.header("x-frame-options", "DENY");
-    reply.header(
-      "content-security-policy",
-      "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
-    );
+    // The consent page sets its own (redirect-aware) CSP; don't clobber it.
+    if (!reply.hasHeader("content-security-policy")) {
+      reply.header("content-security-policy", BASE_CSP);
+    }
     done(null, payload);
   });
   // Central OAuth error mapping (RFC 6749 §5.2): endpoints throw OAuthError;

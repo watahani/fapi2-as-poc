@@ -5,6 +5,24 @@
 import type { FastifyReply } from "fastify";
 import { sanitizeErrorDescription, type AuthorizeErrorCode } from "../domain/errors.js";
 
+/** Baseline response CSP (clickjacking + injection defence). `form-action
+ * 'self'` is deliberately strict for every response EXCEPT the consent page,
+ * whose form submission legitimately 303-redirects to the client's registered
+ * redirect_uri (a cross-origin navigation). Browsers re-check the redirect
+ * target of a form submission against the submitting document's form-action,
+ * so the consent page must widen form-action to that one already-validated
+ * origin (see consentCsp) — otherwise the authorization redirect is blocked. */
+export const BASE_CSP =
+  "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+
+/** CSP for the consent page: BASE_CSP plus the origin of the redirect_uri the
+ * approve/deny submission will navigate to. The origin is taken from the
+ * redirect_uri that authorization-request validation already registered and
+ * exact-matched, so this widens form-action by exactly one trusted origin. */
+export function consentCsp(redirectUri: string): string {
+  return `${BASE_CSP} ${new URL(redirectUri).origin}`;
+}
+
 /** Add response parameters to the redirect URI's query component. Any
  * pre-registered param of the same name is REPLACED, not appended, so a
  * registered `?iss=`/`?state=` cannot inject a second value that a client

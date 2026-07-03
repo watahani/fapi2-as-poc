@@ -34,7 +34,7 @@ import {
   type LoginSession,
 } from "../domain/sessions.js";
 import { renderConsent, renderError, renderLogin } from "./views.js";
-import { redirectCode, redirectError } from "./redirect.js";
+import { consentCsp, redirectCode, redirectError } from "./redirect.js";
 import type { EndpointDeps } from "./index.js";
 
 const str = (v: unknown): string | undefined =>
@@ -109,6 +109,10 @@ export function registerInteraction(app: FastifyInstance, deps: EndpointDeps): v
       s.acr ?? null,
       s.amr ?? null,
     );
+    // The approve/deny submission 303-redirects to the client's registered
+    // redirect_uri (cross-origin), so form-action must permit that one origin;
+    // the global BASE_CSP ('self' only) would otherwise block the redirect.
+    reply.header("content-security-policy", consentCsp(ctx.request.redirectUri));
     return html(reply, 200, renderConsent({
       action: paths.interactionConsent,
       interactionId: id,
