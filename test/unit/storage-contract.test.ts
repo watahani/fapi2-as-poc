@@ -215,6 +215,50 @@ describe.each(backends)("storage contract ($name)", ({ name, storage }) => {
     });
   });
 
+  describe("interactions (P2 pending authorization)", () => {
+    const mk = (over: Record<string, unknown> = {}) => ({
+      id: randomUUID(),
+      clientId,
+      requestUri: `urn:ietf:params:oauth:request_uri:${randomUUID()}`,
+      subject: null,
+      authTime: null,
+      acr: null,
+      amr: null,
+      createdAt: now(),
+      expiresAt: later(600),
+      ...over,
+    });
+
+    it("finds a live interaction and hides expired/unknown ones", async () => {
+      const rec = mk();
+      await s.interactions.insert(rec);
+      expect((await s.interactions.find(rec.id, now()))?.requestUri).toBe(rec.requestUri);
+      expect(await s.interactions.find(randomUUID(), now())).toBeNull();
+      const expired = mk({ expiresAt: later(-1) });
+      await s.interactions.insert(expired);
+      expect(await s.interactions.find(expired.id, now())).toBeNull();
+    });
+
+    it("attaches the authenticated subject", async () => {
+      const rec = mk();
+      await s.interactions.insert(rec);
+      await s.interactions.setSubject(rec.id, "user-9", now(), "urn:dev:pwd", ["pwd"]);
+      const loaded = await s.interactions.find(rec.id, now());
+      expect(loaded?.subject).toBe("user-9");
+      expect(loaded?.acr).toBe("urn:dev:pwd");
+      expect(loaded?.amr).toEqual(["pwd"]);
+    });
+
+    it("complete() is one-time", async () => {
+      const rec = mk({ subject: "user-1", authTime: now() });
+      await s.interactions.insert(rec);
+      expect((await s.interactions.complete(rec.id, now()))?.subject).toBe("user-1");
+      expect(await s.interactions.complete(rec.id, now())).toBeNull();
+      // A completed interaction is no longer findable.
+      expect(await s.interactions.find(rec.id, now())).toBeNull();
+    });
+  });
+
   // `name` intentionally referenced so vitest prints the backend in failures.
   it(`runs against ${name}`, () => expect(true).toBe(true));
 });

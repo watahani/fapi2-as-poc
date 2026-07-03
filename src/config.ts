@@ -30,6 +30,16 @@ const schema = z.object({
   // Subject auto-authenticated by the built-in dev interaction (P1; replaced
   // by external IdP delegation in P2).
   DEV_INTERACTION_SUB: z.string().default("dev-user"),
+  // P2 interactive dev login: comma-separated usernames the dev login form
+  // accepts. Empty = allow only DEV_INTERACTION_SUB.
+  DEV_LOGIN_USERS: z.string().default(""),
+  // HMAC secret for the signed login-session cookie + CSRF tokens. Required in
+  // production; a random per-process value is used when unset (dev only).
+  SESSION_SECRET: z.string().default(""),
+  // Pending-authorization interaction lifetime (login+consent window).
+  INTERACTION_TTL_SEC: z.coerce.number().int().positive().max(3600).default(600),
+  // Login-session cookie lifetime.
+  SESSION_TTL_SEC: z.coerce.number().int().positive().default(3600),
 
   // --- Protocol lifetimes (seconds) ---
   // FAPI2-GEN-11: authorization codes shall have a maximum lifetime of 60s.
@@ -94,6 +104,10 @@ export type AppConfig = Readonly<{
   redisUrl: string;
   externalIdpUrl: string;
   devInteractionSub: string;
+  devLoginUsers: readonly string[];
+  sessionSecret: string;
+  interactionTtlSec: number;
+  sessionTtlSec: number;
   authCodeTtlSec: number;
   parTtlSec: number;
   accessTokenTtlSec: number;
@@ -141,6 +155,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   if (parsed.DATABASE_SSL !== "true") devGrade.push("DATABASE_SSL is disabled");
   if (!keystoreKek) devGrade.push("KEYSTORE_KEK unset: private signing keys stored unencrypted");
+  if (!parsed.SESSION_SECRET) {
+    devGrade.push("SESSION_SECRET unset: login-session/CSRF secret is a per-process random value");
+  }
+  // A short HMAC key for the session/nonce secrets is brute-forceable offline
+  // from one observed cookie/nonce → session forgery. Enforce >=32 chars
+  // whenever set (the random fallback already exceeds this).
+  if (parsed.SESSION_SECRET && parsed.SESSION_SECRET.length < 32) {
+    throw new Error("SESSION_SECRET must be at least 32 characters");
+  }
+  if (parsed.DPOP_NONCE_SECRET && parsed.DPOP_NONCE_SECRET.length < 32) {
+    throw new Error("DPOP_NONCE_SECRET must be at least 32 characters");
+  }
   // DPoP nonces must be predictable neither to attackers nor across replicas:
   // an explicit shared secret is required when the mechanism is enabled.
   const dpopNonceRequired = parsed.DPOP_NONCE_REQUIRED === "true";
@@ -186,6 +212,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     redisUrl: parsed.REDIS_URL,
     externalIdpUrl: parsed.EXTERNAL_IDP_URL,
     devInteractionSub: parsed.DEV_INTERACTION_SUB,
+    devLoginUsers: parsed.DEV_LOGIN_USERS
+      ? parsed.DEV_LOGIN_USERS.split(",").map((u) => u.trim()).filter(Boolean)
+      : [parsed.DEV_INTERACTION_SUB],
+    sessionSecret: parsed.SESSION_SECRET || randomBytes(32).toString("base64url"),
+    interactionTtlSec: parsed.INTERACTION_TTL_SEC,
+    sessionTtlSec: parsed.SESSION_TTL_SEC,
     authCodeTtlSec: parsed.AUTH_CODE_TTL_SEC,
     parTtlSec: parsed.PAR_TTL_SEC,
     accessTokenTtlSec: parsed.ACCESS_TOKEN_TTL_SEC,

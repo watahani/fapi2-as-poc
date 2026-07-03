@@ -53,9 +53,10 @@ describe("loadConfig", () => {
     DATABASE_URL: "postgresql://u:p@db.internal:5432/as",
     DATABASE_SSL: "true",
     KEYSTORE_KEK: Buffer.alloc(32, 7).toString("base64"),
+    SESSION_SECRET: "prod-session-secret-at-least-32-characters-long",
   } as NodeJS.ProcessEnv;
 
-  it("fails closed in production (memory storage, mock PDP, dev DB, http/loopback issuer, no KEK/TLS)", () => {
+  it("fails closed in production (memory storage, mock PDP, dev DB, http/loopback issuer, no KEK/TLS/session)", () => {
     expect(() => loadConfig({ ...prodBase, STORAGE: "memory" })).toThrow(/STORAGE/);
     expect(() => loadConfig({ ...prodBase, PDP_KIND: "mock" })).toThrow(/PDP_KIND/);
     expect(() => loadConfig({ ...prodBase, ISSUER: "https://localhost:3000" })).toThrow(/loopback/);
@@ -68,6 +69,7 @@ describe("loadConfig", () => {
     ).toThrow(/DATABASE_URL/);
     expect(() => loadConfig({ ...prodBase, DATABASE_SSL: "false" })).toThrow(/DATABASE_SSL/);
     expect(() => loadConfig({ ...prodBase, KEYSTORE_KEK: "" })).toThrow(/KEYSTORE_KEK/);
+    expect(() => loadConfig({ ...prodBase, SESSION_SECRET: "" })).toThrow(/SESSION_SECRET/);
   });
 
   it("accepts a fully-configured production environment", () => {
@@ -83,6 +85,11 @@ describe("loadConfig", () => {
 
   it("rejects a malformed KEYSTORE_KEK", () => {
     expect(() => loadConfig({ ...base, KEYSTORE_KEK: "dG9vc2hvcnQ=" })).toThrow(/32 bytes/);
+  });
+
+  it("rejects a too-short SESSION_SECRET / DPOP_NONCE_SECRET (brute-forceable)", () => {
+    expect(() => loadConfig({ ...base, SESSION_SECRET: "short" })).toThrow(/SESSION_SECRET/);
+    expect(() => loadConfig({ ...base, DPOP_NONCE_SECRET: "short" })).toThrow(/DPOP_NONCE_SECRET/);
   });
 
   it("itemises dev-grade settings for boot-time warnings", () => {
