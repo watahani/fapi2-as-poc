@@ -52,6 +52,9 @@ export function buildApp(deps: AppDeps = {}): FastifyInstance {
     // FAPI flows carry signed request objects / DPoP proofs; PAR requests
     // beyond this bound get 413 (RFC 9126 §2.3).
     bodyLimit: 256 * 1024,
+    // Behind an ingress this must be set so req.ip (the rate-limit key) is the
+    // real client rather than the proxy; unset it is false (safe when direct).
+    trustProxy: config.trustProxy,
   });
 
   const keystore = new KeyStore(storage.keys, {
