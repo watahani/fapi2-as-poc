@@ -2,8 +2,15 @@
  * Test fixtures: a registered confidential client with an ES256 keypair and
  * a private_key_jwt assertion factory (RFC 7523 §2.2 / OIDC Core §9).
  */
-import { randomUUID } from "node:crypto";
-import { SignJWT, exportJWK, generateKeyPair, type KeyLike } from "jose";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  SignJWT,
+  calculateJwkThumbprint,
+  exportJWK,
+  generateKeyPair,
+  type JWK,
+  type KeyLike,
+} from "jose";
 import type { Storage } from "../../src/db/repositories/types.js";
 
 export interface TestClient {
@@ -84,4 +91,49 @@ export function form(params: Record<string, string | string[]>): string {
     for (const item of Array.isArray(v) ? v : [v]) sp.append(k, item);
   }
   return sp.toString();
+}
+
+/** A DPoP proof holder: its own key pair + proof factory (RFC 9449 §4). */
+export interface DpopKey {
+  privateKey: KeyLike;
+  publicJwk: JWK;
+  jkt: string;
+  proof(opts: { htm: string; htu: string } & Partial<DpopClaims>): Promise<string>;
+}
+
+interface DpopClaims {
+  jti: string;
+  iat: number;
+  nonce: string;
+  ath: string;
+}
+
+export async function createDpopKey(): Promise<DpopKey> {
+  const { publicKey, privateKey } = await generateKeyPair("ES256", { extractable: true });
+  const publicJwk = (await exportJWK(publicKey)) as JWK;
+  const jkt = await calculateJwkThumbprint(publicJwk, "sha256");
+  return {
+    privateKey,
+    publicJwk,
+    jkt,
+    async proof(opts) {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const payload: Record<string, unknown> = {
+        jti: opts.jti ?? randomUUID(),
+        htm: opts.htm,
+        htu: opts.htu,
+        iat: opts.iat ?? nowSec,
+      };
+      if (opts.nonce !== undefined) payload.nonce = opts.nonce;
+      if (opts.ath !== undefined) payload.ath = opts.ath;
+      return new SignJWT(payload as never)
+        .setProtectedHeader({ alg: "ES256", typ: "dpop+jwt", jwk: publicJwk })
+        .sign(privateKey);
+    },
+  };
+}
+
+/** RFC 9449 §6.1 ath: base64url(SHA-256(access token)). */
+export function accessTokenHash(token: string): string {
+  return createHash("sha256").update(token, "ascii").digest("base64url");
 }

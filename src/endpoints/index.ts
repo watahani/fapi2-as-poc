@@ -8,6 +8,7 @@ import { registerDiscovery } from "./discovery.js";
 import { registerFormBodyParser } from "./form.js";
 import { registerPar } from "./par.js";
 import { registerAuthorize } from "./authorize.js";
+import { registerToken } from "./token.js";
 import { FixedWindowRateLimiter } from "./rate-limit.js";
 
 export interface EndpointDeps {
@@ -79,4 +80,5 @@ export function registerEndpoints(app: FastifyInstance, input: EndpointDepsInput
   registerDiscovery(app, deps);
   registerPar(app, deps);
   registerAuthorize(app, deps);
+  registerToken(app, deps);
 }
