@@ -17,7 +17,10 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["test/conformance/**/*.test.ts"],
-    // No DB required: every endpoint is unimplemented (404) until P1, and the
-    // assertions target metadata/validation behaviour rather than persistence.
+    // No DB required: the AS runs on the in-memory storage adapter
+    // (src/db/repositories/memory.ts), keeping this layer Docker-free.
+    // ISSUER is pinned so an inherited environment (e.g. conformance.yml's
+    // http issuer for the external suite) cannot skew these assertions.
+    env: { STORAGE: "memory", ISSUER: "https://localhost:3000" },
   },
 });

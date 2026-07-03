@@ -7,6 +7,22 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      # Storage contract tests run against real PostgreSQL (in addition to the
+      # in-memory adapter) so both adapters provably share protocol semantics.
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: authserver_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -22,6 +38,8 @@ jobs:
 
       - name: Test
         run: npm test
+        env:
+          PG_TEST_URL: postgresql://ci:ci@localhost:5432/authserver_test
 
       # Supply-chain gate: production dependencies must have no high+ vulns.
       - name: Production dependency audit
@@ -59,6 +77,9 @@ jobs:
             -e ISSUER=https://as.ci.example.com \
             -e PDP_KIND=authzen-http \
             -e DATABASE_URL=postgresql://ci:ci@db.invalid:5432/as \
+            -e DATABASE_SSL=true \
+            -e STORAGE=postgres \
+            -e KEYSTORE_KEK="$(head -c 32 /dev/urandom | base64)" \
             auth-server:ci
           ok=
           for _ in $(seq 1 20); do curl -sf http://localhost:3000/health && ok=1 && break; sleep 1; done

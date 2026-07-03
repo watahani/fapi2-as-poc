@@ -9,16 +9,16 @@ import { readdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pino from "pino";
+import type pg from "pg";
 import { loadConfig } from "../config.js";
 import { getPool } from "./pool.js";
 
-const log = pino({ level: process.env.LOG_LEVEL ?? "info" });
 const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "migrations");
 
-async function run(): Promise<void> {
-  const config = loadConfig();
-  const pool = getPool(config.databaseUrl, { ssl: config.databaseSsl });
-
+export async function runMigrations(
+  pool: pg.Pool,
+  log: { info: (obj: unknown, msg?: string) => void } = { info: () => {} },
+): Promise<void> {
   await pool.query(
     `create table if not exists schema_migrations (
        id text primary key,
@@ -49,12 +49,20 @@ async function run(): Promise<void> {
       client.release();
     }
   }
+}
 
+async function main(): Promise<void> {
+  const log = pino({ level: process.env.LOG_LEVEL ?? "info" });
+  const config = loadConfig();
+  const pool = getPool(config.databaseUrl, { ssl: config.databaseSsl });
+  await runMigrations(pool, log);
   await pool.end();
   log.info("migrations complete");
 }
 
-run().catch((err) => {
-  log.error({ err }, "migration failed");
-  process.exitCode = 1;
-});
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    pino().error({ err }, "migration failed");
+    process.exitCode = 1;
+  });
+}

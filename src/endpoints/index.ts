@@ -1,23 +1,66 @@
 import type { FastifyInstance } from "fastify";
-import type pg from "pg";
 import type { AppConfig } from "../config.js";
 import type { PolicyDecisionPoint } from "../authz/pdp.js";
+import type { Storage } from "../db/repositories/types.js";
+import type { KeyStore } from "../crypto/keys.js";
+import { OAuthError } from "../domain/errors.js";
+import { registerDiscovery } from "./discovery.js";
 
 export interface EndpointDeps {
   config: AppConfig;
   pdp: PolicyDecisionPoint;
-  pool: pg.Pool;
+  storage: Storage;
+  keystore: KeyStore;
 }
 
 /**
- * Protocol engine boundary. P1 registers the FAPI 2.0 endpoints here, each a
- * thin handler delegating to scratch-implemented protocol logic in src/domain:
- *   POST /par                              (RFC 9126)
- *   GET  /authorize                        (RFC 6749 + PKCE, PAR-required)
- *   POST /token                            (private_key_jwt + DPoP)
- *   GET  /.well-known/openid-configuration (RFC 8414 / OIDC Discovery)
- *   GET  /jwks
+ * Protocol engine boundary: each endpoint is a thin handler delegating to
+ * scratch-implemented protocol logic in src/domain.
+ *   GET  /.well-known/openid-configuration   OIDC Discovery §4
+ *   GET  /.well-known/oauth-authorization-server   RFC 8414 §3
+ *   GET  /jwks                                RFC 7517
+ *   POST /par                                 RFC 9126           (P1-b)
+ *   GET|POST /authorize                       RFC 6749 + PKCE    (P1-c)
+ *   POST /token                               private_key_jwt + DPoP (P1-d)
+ *   POST /revoke                              RFC 7009           (P1-e)
+ *   POST /introspect                          RFC 7662           (P1-e)
  */
-export function registerEndpoints(_app: FastifyInstance, _deps: EndpointDeps): void {
-  // no-op in P0
+export function registerEndpoints(app: FastifyInstance, deps: EndpointDeps): void {
+  // Central OAuth error mapping (RFC 6749 §5.2): endpoints throw OAuthError;
+  // this handler renders status/headers/JSON body consistently, including
+  // WWW-Authenticate (invalid_client) and DPoP-Nonce (use_dpop_nonce).
+  app.setErrorHandler((err, req, reply) => {
+    if (err instanceof OAuthError) {
+      void reply
+        .headers({ "cache-control": "no-store", pragma: "no-cache", ...err.headers })
+        .code(err.status)
+        .send(err.toBody());
+      return;
+    }
+    // Framework errors with a meaningful 4xx (e.g. 413 body-too-large at the
+    // PAR endpoint, RFC 9126 §2.3) keep their status but get a FIXED
+    // description — raw framework messages can quote request content and
+    // fingerprint the stack. Everything else is an opaque server_error.
+    const { statusCode } = err as { statusCode?: unknown };
+    const status = typeof statusCode === "number" ? statusCode : 500;
+    if (status >= 400 && status < 500) {
+      const description =
+        status === 413 ? "request entity too large" :
+        status === 415 ? "unsupported media type" :
+        "malformed request";
+      req.log.info({ err }, "request rejected");
+      void reply
+        .headers({ "cache-control": "no-store", pragma: "no-cache" })
+        .code(status)
+        .send({ error: "invalid_request", error_description: description });
+      return;
+    }
+    req.log.error({ err }, "unhandled error");
+    void reply
+      .headers({ "cache-control": "no-store", pragma: "no-cache" })
+      .code(500)
+      .send({ error: "server_error" });
+  });
+
+  registerDiscovery(app, deps);
 }
