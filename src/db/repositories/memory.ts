@@ -16,6 +16,8 @@ import type {
   CodeRedemption,
   GrantRecord,
   GrantRepository,
+  InteractionRecord,
+  InteractionRepository,
   JtiReplayRepository,
   ParRequestRecord,
   ParRequestRepository,
@@ -200,6 +202,51 @@ class MemoryJtiReplay implements JtiReplayRepository {
   }
 }
 
+class MemoryInteractions implements InteractionRepository {
+  private readonly rows = new Map<string, InteractionRecord & { completedAt: Date | null }>();
+
+  async insert(rec: InteractionRecord): Promise<void> {
+    // Sweep expired/abandoned interactions to keep the map bounded.
+    if (this.rows.size >= 1024) {
+      for (const [id, row] of this.rows) {
+        if (row.expiresAt.getTime() <= rec.createdAt.getTime()) this.rows.delete(id);
+      }
+    }
+    this.rows.set(rec.id, { ...structuredClone(rec), completedAt: null });
+  }
+
+  async find(id: string, now: Date): Promise<InteractionRecord | null> {
+    const row = this.rows.get(id);
+    if (!row || row.completedAt !== null || row.expiresAt.getTime() <= now.getTime()) return null;
+    const { completedAt: _c, ...rec } = row;
+    return structuredClone(rec);
+  }
+
+  async setSubject(
+    id: string,
+    subject: string,
+    authTime: Date,
+    acr: string | null,
+    amr: string[] | null,
+  ): Promise<void> {
+    const row = this.rows.get(id);
+    if (row && row.completedAt === null) {
+      row.subject = subject;
+      row.authTime = authTime;
+      row.acr = acr;
+      row.amr = amr ? [...amr] : null;
+    }
+  }
+
+  async complete(id: string, now: Date): Promise<InteractionRecord | null> {
+    const row = this.rows.get(id);
+    if (!row || row.completedAt !== null || row.expiresAt.getTime() <= now.getTime()) return null;
+    row.completedAt = now;
+    const { completedAt: _c, ...rec } = row;
+    return structuredClone(rec);
+  }
+}
+
 export function createMemoryStorage(): Storage {
   return {
     keys: new MemorySigningKeys(),
@@ -210,6 +257,7 @@ export function createMemoryStorage(): Storage {
     accessTokens: new MemoryAccessTokens(),
     refreshTokens: new MemoryRefreshTokens(),
     jti: new MemoryJtiReplay(),
+    interactions: new MemoryInteractions(),
     ping: async () => true, // in-process store is always ready
   };
 }

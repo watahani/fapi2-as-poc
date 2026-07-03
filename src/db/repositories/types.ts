@@ -139,6 +139,41 @@ export interface RefreshTokenRepository {
   revokeByGrant(grantId: string, at: Date): Promise<void>;
 }
 
+/**
+ * A pending authorization interaction (P2): the /authorize request is parked
+ * here — referencing the not-yet-consumed PAR request_uri — while the user
+ * logs in and consents. Short-lived; the request_uri itself is consumed only
+ * when the interaction is completed (consent approved).
+ */
+export interface InteractionRecord {
+  /** Opaque interaction id (carried in the interaction URLs). */
+  id: string;
+  clientId: string;
+  requestUri: string;
+  /** Subject once authenticated (null until login completes). */
+  subject: string | null;
+  authTime: Date | null;
+  acr: string | null;
+  amr: string[] | null;
+  createdAt: Date;
+  expiresAt: Date;
+}
+
+export interface InteractionRepository {
+  insert(rec: InteractionRecord): Promise<void>;
+  find(id: string, now: Date): Promise<InteractionRecord | null>;
+  /** Attach the authenticated subject after login. */
+  setSubject(
+    id: string,
+    subject: string,
+    authTime: Date,
+    acr: string | null,
+    amr: string[] | null,
+  ): Promise<void>;
+  /** One-time completion: returns the record only on the first call. */
+  complete(id: string, now: Date): Promise<InteractionRecord | null>;
+}
+
 export interface JtiReplayRepository {
   /**
    * Register a jti within a context ("client-assertion", "dpop:<htu>").
@@ -157,6 +192,7 @@ export interface Storage {
   accessTokens: AccessTokenRepository;
   refreshTokens: RefreshTokenRepository;
   jti: JtiReplayRepository;
+  interactions: InteractionRepository;
   /** Readiness of the backing store (drives /healthz). */
   ping(): Promise<boolean>;
 }

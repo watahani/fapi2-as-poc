@@ -84,6 +84,7 @@ jobs:
             -e DATABASE_SSL=true \
             -e STORAGE=postgres \
             -e KEYSTORE_KEK="$(head -c 32 /dev/urandom | base64)" \
+            -e SESSION_SECRET="$(head -c 32 /dev/urandom | base64)" \
             auth-server:ci
           ok=
           for _ in $(seq 1 20); do curl -sf http://localhost:3000/health && ok=1 && break; sleep 1; done

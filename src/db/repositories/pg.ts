@@ -17,6 +17,8 @@ import type {
   CodeRedemption,
   GrantRecord,
   GrantRepository,
+  InteractionRecord,
+  InteractionRepository,
   JtiReplayRepository,
   ParRequestRecord,
   ParRequestRepository,
@@ -344,6 +346,84 @@ class PgJtiReplay implements JtiReplayRepository {
   }
 }
 
+function interactionRow(row: Record<string, unknown>): InteractionRecord {
+  return {
+    id: row.id as string,
+    clientId: row.client_id as string,
+    requestUri: row.request_uri as string,
+    subject: row.subject as string | null,
+    authTime: row.auth_time as Date | null,
+    acr: row.acr as string | null,
+    amr: row.amr as string[] | null,
+    createdAt: row.created_at as Date,
+    expiresAt: row.expires_at as Date,
+  };
+}
+
+class PgInteractions implements InteractionRepository {
+  constructor(private readonly pool: pg.Pool) {}
+
+  async insert(rec: InteractionRecord): Promise<void> {
+    // Probabilistic reap of expired/abandoned interactions (no background job).
+    if (Math.random() < 0.02) {
+      await this.pool.query(
+        `delete from interactions where ctid in
+           (select ctid from interactions where expires_at <= $1 limit 1000)`,
+        [rec.createdAt],
+      );
+    }
+    await this.pool.query(
+      `insert into interactions
+         (id, client_id, request_uri, subject, auth_time, acr, amr, created_at, expires_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        rec.id,
+        rec.clientId,
+        rec.requestUri,
+        rec.subject,
+        rec.authTime,
+        rec.acr,
+        rec.amr,
+        rec.createdAt,
+        rec.expiresAt,
+      ],
+    );
+  }
+
+  async find(id: string, now: Date): Promise<InteractionRecord | null> {
+    const res = await this.pool.query(
+      `select * from interactions where id = $1 and completed_at is null and expires_at > $2`,
+      [id, now],
+    );
+    return res.rows[0] ? interactionRow(res.rows[0]) : null;
+  }
+
+  async setSubject(
+    id: string,
+    subject: string,
+    authTime: Date,
+    acr: string | null,
+    amr: string[] | null,
+  ): Promise<void> {
+    await this.pool.query(
+      `update interactions set subject = $2, auth_time = $3, acr = $4, amr = $5
+        where id = $1 and completed_at is null`,
+      [id, subject, authTime, acr, amr],
+    );
+  }
+
+  async complete(id: string, now: Date): Promise<InteractionRecord | null> {
+    // Atomic one-time completion (the request_uri is consumed separately).
+    const res = await this.pool.query(
+      `update interactions set completed_at = $2
+        where id = $1 and completed_at is null and expires_at > $2
+        returning *`,
+      [id, now],
+    );
+    return res.rows[0] ? interactionRow(res.rows[0]) : null;
+  }
+}
+
 export function createPgStorage(pool: pg.Pool): Storage {
   return {
     keys: new PgSigningKeys(pool),
@@ -354,6 +434,7 @@ export function createPgStorage(pool: pg.Pool): Storage {
     accessTokens: new PgAccessTokens(pool),
     refreshTokens: new PgRefreshTokens(pool),
     jti: new PgJtiReplay(pool),
+    interactions: new PgInteractions(pool),
     ping: () => pingDb(pool),
   };
 }

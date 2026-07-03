@@ -43,6 +43,18 @@ export function registerEndpoints(app: FastifyInstance, input: EndpointDepsInput
     ...input,
     rateLimiter: new FixedWindowRateLimiter(input.config.rateLimitPerMin),
   };
+
+  // Clickjacking defence for the interaction (login/consent) pages and every
+  // other response (OIDC §3.1.2.3 / RFC 6749 §10.13). FAPI2 5.2.3(3) forbids
+  // CORS on the authorization endpoint; not emitting ACAO keeps it same-origin.
+  app.addHook("onSend", (_req, reply, payload, done) => {
+    reply.header("x-frame-options", "DENY");
+    reply.header(
+      "content-security-policy",
+      "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    );
+    done(null, payload);
+  });
   // Central OAuth error mapping (RFC 6749 §5.2): endpoints throw OAuthError;
   // this handler renders status/headers/JSON body consistently, including
   // WWW-Authenticate (invalid_client) and DPoP-Nonce (use_dpop_nonce).
