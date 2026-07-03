@@ -5,6 +5,7 @@
  * Protocol-affecting defaults cite their governing requirement
  * (docs/REQUIREMENTS-P1.md).
  */
+import { randomBytes } from "node:crypto";
 import { z } from "zod";
 
 const schema = z.object({
@@ -52,7 +53,9 @@ const schema = z.object({
   DPOP_PROOF_MAX_AGE_SEC: z.coerce.number().int().positive().default(60),
   // FAPI2-GEN-10 / DPOP-15..17: server-provided nonce mechanism (MAY).
   DPOP_NONCE_REQUIRED: z.string().default("false"),
-  // HMAC secret for stateless DPoP nonces; generated at boot when empty.
+  // HMAC secret for stateless DPoP nonces. Empty → a random per-process
+  // secret is generated (never the public issuer); set explicitly so nonces
+  // survive restarts and are consistent across replicas.
   DPOP_NONCE_SECRET: z.string().default(""),
 
   // JWTAT-6: default resource indicator used as the JWT AT `aud` when the
@@ -130,6 +133,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   if (parsed.DATABASE_SSL !== "true") devGrade.push("DATABASE_SSL is disabled");
   if (!keystoreKek) devGrade.push("KEYSTORE_KEK unset: private signing keys stored unencrypted");
+  // DPoP nonces must be predictable neither to attackers nor across replicas:
+  // an explicit shared secret is required when the mechanism is enabled.
+  const dpopNonceRequired = parsed.DPOP_NONCE_REQUIRED === "true";
+  if (dpopNonceRequired && !parsed.DPOP_NONCE_SECRET) {
+    devGrade.push("DPOP_NONCE_SECRET unset while DPOP_NONCE_REQUIRED=true (per-process random secret)");
+  }
 
   // Fail closed in production: never ship allow-all authZ or dev defaults.
   if ((env.NODE_ENV ?? "") === "production" && devGrade.length > 0) {
@@ -177,8 +186,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     clientAssertionMaxLifetimeSec: parsed.CLIENT_ASSERTION_MAX_LIFETIME_SEC,
     clockSkewFutureAcceptSec: parsed.CLOCK_SKEW_FUTURE_ACCEPT_SEC,
     dpopProofMaxAgeSec: parsed.DPOP_PROOF_MAX_AGE_SEC,
-    dpopNonceRequired: parsed.DPOP_NONCE_REQUIRED === "true",
-    dpopNonceSecret: parsed.DPOP_NONCE_SECRET,
+    dpopNonceRequired,
+    // Never the public issuer: a random per-process secret when unset.
+    dpopNonceSecret: parsed.DPOP_NONCE_SECRET || randomBytes(32).toString("base64url"),
     accessTokenAudience: parsed.ACCESS_TOKEN_AUDIENCE || issuer,
     rateLimitPerMin: parsed.RATE_LIMIT_PER_MIN,
     trustProxy: parseTrustProxy(parsed.TRUST_PROXY),

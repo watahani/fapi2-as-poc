@@ -24,6 +24,7 @@ import { closePool } from "../../src/db/pool.js";
 import { createMemoryStorage } from "../../src/db/repositories/memory.js";
 import {
   ASSERTION_TYPE,
+  createDpopKey,
   createTestClient,
   form,
   makeClientAssertion,
@@ -269,5 +270,62 @@ describe("Token endpoint [RFC 6749, RFC 7523, RFC 9449, RFC 9068]", () => {
     });
     expect(res.statusCode).toBeGreaterThanOrEqual(400);
     expect((res.json() as { error?: string }).error).toBe("invalid_client");
+  });
+
+  it("completes the DPoP + private_key_jwt authorization-code flow end to end", async () => {
+    const dpop = await createDpopKey();
+    const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+    const challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"; // S256(verifier)
+
+    // PAR (client-authenticated, dpop_jkt bound).
+    const par = await inject({
+      method: "POST",
+      url: "/par",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: form({
+        ...(await clientAuth()),
+        response_type: "code",
+        client_id: client.clientId,
+        redirect_uri: client.redirectUri,
+        scope: "openid",
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+        dpop_jkt: dpop.jkt,
+      }),
+    });
+    expect(par.statusCode, par.payload).toBe(201);
+    const { request_uri } = par.json() as { request_uri: string };
+
+    // Authorize → code (dev interaction).
+    const authz = await inject({
+      method: "GET",
+      url: `/authorize?client_id=${client.clientId}&request_uri=${encodeURIComponent(request_uri)}`,
+    });
+    expect(authz.statusCode).toBe(303);
+    const loc = new URL(String(authz.headers.location));
+    expect(loc.searchParams.get("iss")).toBe(ISSUER); // RFC 9207
+    const code = loc.searchParams.get("code")!;
+
+    // Token (DPoP-bound access token).
+    const tok = await inject({
+      method: "POST",
+      url: "/token",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        dpop: await dpop.proof({ htm: "POST", htu: `${ISSUER}/token` }),
+      },
+      payload: form({
+        ...(await clientAuth()),
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: client.redirectUri,
+        code_verifier: verifier,
+      }),
+    });
+    expect(tok.statusCode, tok.payload).toBe(200);
+    const body = tok.json() as Record<string, string>;
+    expect(body.token_type).toBe("DPoP"); // sender-constrained (FAPI2 5.3.2.1(4))
+    expect(body.access_token).toBeTruthy();
+    expect(body.id_token).toBeTruthy();
   });
 });
