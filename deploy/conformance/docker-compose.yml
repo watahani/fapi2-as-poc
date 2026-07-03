@@ -18,6 +18,15 @@ services:
     depends_on: [mongodb]
     environment:
       MONGODB_HOST: mongodb
+      # Must mirror k8s/suite.yaml: the entrypoint always wires Google/GitLab
+      # OIDC admin login from these vars and Spring rejects empty client-ids,
+      # so the server exits at boot (httpd then 502s) without them. devmode
+      # enables local admin auth instead of external OIDC.
+      JAVA_EXTRA_ARGS: "-Dfintechlabs.devmode=true -Dfintechlabs.startredir=true"
+      OIDC_GOOGLE_CLIENTID: "dummy"
+      OIDC_GOOGLE_SECRET: "dummy"
+      OIDC_GITLAB_CLIENTID: "dummy"
+      OIDC_GITLAB_SECRET: "dummy"
     restart: unless-stopped
 
   httpd:

@@ -12,11 +12,11 @@
       "//": "P3: client private_key_jwt signing JWKS (the suite generates/holds the key)"
     }
   },
+  "//variant": "The FAPI2 SP final plan fixes fapi_request_method (pushed) and fapi_response_mode (plain_response) itself, so only the user-selectable variants are set here or the suite rejects the plan (HTTP 400).",
   "variant": {
     "fapi_profile": "plain_fapi",
+    "openid": "openid_connect",
     "client_auth_type": "private_key_jwt",
-    "sender_constrain": "dpop",
-    "fapi_request_method": "pushed",
-    "fapi_response_mode": "plain_response"
+    "sender_constrain": "dpop"
   }
 }

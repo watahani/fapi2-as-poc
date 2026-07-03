@@ -77,12 +77,19 @@ jobs:
         run: docker compose -f deploy/conformance/docker-compose.yml up -d --pull always
       - name: Wait for suite to be ready
         run: |
-          for _ in $(seq 1 60); do
-            curl -ksf --connect-timeout 5 --max-time 10 https://localhost:8443/api/runner/available \
-              && { echo; echo "suite ready"; break; }
+          ready=
+          for _ in $(seq 1 80); do
+            if curl -ksf --connect-timeout 5 --max-time 10 https://localhost:8443/api/runner/available; then
+              echo; echo "suite ready"; ready=1; break
+            fi
             sleep 3
           done
           docker compose -f deploy/conformance/docker-compose.yml ps
+          if [ -z "$ready" ]; then
+            echo "::error::conformance suite did not become ready; server logs:"
+            docker compose -f deploy/conformance/docker-compose.yml logs --tail=200 server
+            exit 1
+          fi
       - name: Run FAPI 2.0 SP test plan
         run: bash deploy/conformance/run-conformance.sh
 
