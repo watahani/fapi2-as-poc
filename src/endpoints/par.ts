@@ -4,14 +4,16 @@
  * lives in src/domain/par.ts / client-auth.ts.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { endpointPaths } from "../config.js";
+import { endpointPaths, endpointUrls } from "../config.js";
 import { authenticateClient } from "../domain/client-auth.js";
+import { verifyDpopProof } from "../domain/dpop.js";
 import { invalidRequest } from "../domain/errors.js";
 import { pushAuthorizationRequest } from "../domain/par.js";
 import type { EndpointDeps } from "./index.js";
 
 export function registerPar(app: FastifyInstance, deps: EndpointDeps): void {
   const path = endpointPaths(deps.config).par;
+  const htu = endpointUrls(deps.config).par;
 
   app.post(path, async (req: FastifyRequest, reply: FastifyReply) => {
     // RFC 9126 §2.3: per-source rate limiting → 429. Client identity is not
@@ -35,7 +37,20 @@ export function registerPar(app: FastifyInstance, deps: EndpointDeps): void {
       deps,
     );
 
-    const result = await pushAuthorizationRequest(body, client, deps);
+    // RFC 9449 §10.1: a DPoP proof may accompany the PAR request to bind the
+    // authorization code to the proof key (equivalent to dpop_jkt).
+    let dpopHeaderJkt: string | undefined;
+    if (req.headers.dpop !== undefined) {
+      ({ jkt: dpopHeaderJkt } = await verifyDpopProof(req.headers.dpop, {
+        htm: "POST",
+        htu,
+        config: deps.config,
+        storage: deps.storage,
+        replayContext: "dpop-par",
+      }));
+    }
+
+    const result = await pushAuthorizationRequest(body, client, { ...deps, dpopHeaderJkt });
     req.log.info(
       { audit: "par", clientId: client.clientId, expiresIn: result.expires_in },
       "pushed authorization request accepted",

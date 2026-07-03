@@ -9,7 +9,7 @@ import { randomBytes } from "node:crypto";
 import type { AppConfig } from "../config.js";
 import type { Storage } from "../db/repositories/types.js";
 import type { Client } from "./clients.js";
-import { invalidRequest } from "./errors.js";
+import { invalidDpopProof, invalidRequest } from "./errors.js";
 import { toStoredParams, validateAuthorizationRequest } from "./authz-request.js";
 
 /** RFC 9126 §2.2/§9: urn:ietf:params:oauth:request_uri:<reference>. */
@@ -23,7 +23,13 @@ export interface ParResult {
 export async function pushAuthorizationRequest(
   body: Record<string, unknown>,
   client: Client,
-  deps: { storage: Storage; config: AppConfig; now?: Date },
+  deps: {
+    storage: Storage;
+    config: AppConfig;
+    now?: Date;
+    /** JWK thumbprint from a DPoP header on the PAR request (RFC 9449 §10.1). */
+    dpopHeaderJkt?: string;
+  },
 ): Promise<ParResult> {
   const now = deps.now ?? new Date();
 
@@ -36,6 +42,17 @@ export async function pushAuthorizationRequest(
   // §2.1 step 3: full authorization request validation.
   const validated = validateAuthorizationRequest(body, client, deps.config);
 
+  // RFC 9449 §10.1: a DPoP proof on the PAR request binds the authorization
+  // code to that key exactly like dpop_jkt. If both are present they MUST
+  // match; otherwise either one establishes the binding.
+  let dpopJkt = validated.dpopJkt ?? null;
+  if (deps.dpopHeaderJkt) {
+    if (dpopJkt && dpopJkt !== deps.dpopHeaderJkt) {
+      throw invalidDpopProof("dpop_jkt does not match the DPoP proof key [RFC9449 §10.1]");
+    }
+    dpopJkt = deps.dpopHeaderJkt;
+  }
+
   // §2.2: cryptographically strong random reference (256 bits), bound to the
   // client, expiring well under 600s (FAPI2 5.3.2.2(12)).
   const requestUri = REQUEST_URI_PREFIX + randomBytes(32).toString("base64url");
@@ -43,8 +60,8 @@ export async function pushAuthorizationRequest(
   await deps.storage.par.insert({
     requestUri,
     clientId: client.clientId,
-    params: toStoredParams(validated),
-    dpopJkt: validated.dpopJkt ?? null,
+    params: { ...toStoredParams(validated), ...(dpopJkt ? { dpop_jkt: dpopJkt } : {}) },
+    dpopJkt,
     expiresAt: new Date(now.getTime() + expiresIn * 1000),
   });
 

@@ -102,3 +102,17 @@ describe("endpointUrls", () => {
     expect(urls.jwks).toBe("https://as.example.com/jwks");
   });
 });
+
+import { sanitizeErrorDescription } from "../../src/domain/errors.js";
+
+describe("sanitizeErrorDescription [RFC6749 §5.2 NQSCHAR]", () => {
+  it("strips characters outside the allowed set (e.g. the section sign)", () => {
+    const out = sanitizeErrorDescription("PKCE verification failed [RFC7636 §4.6]");
+    expect(out).toBe("PKCE verification failed [RFC7636 4.6]");
+    expect(/[^\t\n\r\x20-\x21\x23-\x5b\x5d-\x7e]/.test(out)).toBe(false);
+  });
+  it('removes the forbidden " and \\ characters', () => {
+    const out = sanitizeErrorDescription('bad "quote" and \\ backslash');
+    expect(out).not.toMatch(/["\\]/);
+  });
+});

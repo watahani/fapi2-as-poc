@@ -7,10 +7,42 @@
   },
   "client": {
     "client_id": "conformance-test-client",
-    "scope": "openid",
+    "scope": "openid profile",
     "jwks": {
-      "//": "P3: client private_key_jwt signing JWKS (the suite generates/holds the key)"
+      "keys": [
+        {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "AJpvhirE8UA7dir1Vz1lPcS73CuBCC4xusUJnsKHNR8",
+          "y": "iTadyXKDDiUZJEDUDeWEejDl5Y7iwTPHZiLoryW3thM",
+          "d": "BQf5ivij3H_IYidAFD54qnpI61boSYoNoTfDwIcUlLs",
+          "kid": "Af_DqdbiEihJ6m47pxrmsaQYgRJyak4iRPWgIFDl3OE",
+          "alg": "ES256",
+          "use": "sig"
+        }
+      ]
     }
+  },
+  "client2": {
+    "client_id": "conformance-test-client-2",
+    "scope": "openid profile",
+    "jwks": {
+      "keys": [
+        {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "XaghXDAZ_yv0pRt4e_bGri9OQNbIsMfL-kkV5WO_f_s",
+          "y": "ThMtFWe8xTRNeDNoH3ul49jkOb2jkGKlMGxDa9uS-Xw",
+          "d": "_Kdegzs2ww5WizcbQMOlWil7Uxvfbia3fwJ9cjJUTbc",
+          "kid": "GpFOP7G8TeYm_neJyRFeqShkRMhKUPmu35ODm9wto0Q",
+          "alg": "ES256",
+          "use": "sig"
+        }
+      ]
+    }
+  },
+  "resource": {
+    "resourceUrl": "${ISSUER}/userinfo"
   },
   "//variant": "The FAPI2 SP final plan fixes fapi_request_method (pushed) and fapi_response_mode (plain_response) itself, so only the user-selectable variants are set here or the suite rejects the plan (HTTP 400).",
   "variant": {

@@ -18,7 +18,8 @@ logs/
 .DS_Store
 .vitest/
 
-# conformance run output / SBOM artifacts
+# conformance run output / generated TLS material / SBOM artifacts
 deploy/conformance/results/
+deploy/conformance/certs/
 sbom.cdx.json
 .jj
