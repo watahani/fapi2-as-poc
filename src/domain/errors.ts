@@ -41,6 +41,25 @@ export type AuthorizeErrorCode =
   | "request_not_supported"
   | "request_uri_not_supported";
 
+/**
+ * RFC 6749 §5.2: error_description is limited to NQSCHAR —
+ * %x20-21 / %x23-5B / %x5D-7E (printable ASCII except `"` and `\`), plus
+ * HTAB/LF/CR. Our messages cite spec sections with `§` and use `—`/`≤` etc.,
+ * which are outside that set; strip any disallowed character so the emitted
+ * value is always conformant.
+ */
+export function sanitizeErrorDescription(text: string): string {
+  let out = "";
+  for (const ch of text) {
+    const c = ch.codePointAt(0) ?? 0;
+    const ok =
+      c === 0x09 || c === 0x0a || c === 0x0d ||
+      (c >= 0x20 && c <= 0x21) || (c >= 0x23 && c <= 0x5b) || (c >= 0x5d && c <= 0x7e);
+    out += ok ? ch : " ";
+  }
+  return out.replace(/ {2,}/g, " ").trim();
+}
+
 export class OAuthError extends Error {
   readonly error: TokenErrorCode;
   readonly description?: string;
@@ -60,10 +79,10 @@ export class OAuthError extends Error {
     this.headers = opts.headers ?? {};
   }
 
-  /** RFC 6749 §5.2 JSON body. */
+  /** RFC 6749 §5.2 JSON body (error_description sanitised to NQSCHAR). */
   toBody(): { error: string; error_description?: string } {
     return this.description
-      ? { error: this.error, error_description: this.description }
+      ? { error: this.error, error_description: sanitizeErrorDescription(this.description) }
       : { error: this.error };
   }
 }

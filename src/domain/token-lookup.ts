@@ -25,7 +25,7 @@ export interface LookupDeps {
   config: AppConfig;
 }
 
-async function findAccessToken(token: string, deps: LookupDeps): Promise<ResolvedToken | null> {
+export async function findAccessToken(token: string, deps: LookupDeps): Promise<ResolvedToken | null> {
   await deps.keystore.ensure();
   let jti: string;
   try {

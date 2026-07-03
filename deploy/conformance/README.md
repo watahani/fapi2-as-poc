@@ -36,18 +36,19 @@ Suite は **一度だけビルドして GHCR に publish**（`.github/workflows/
 ## 有効化ステータス
 
 - **Layer 1（in-repo）**: 実装済み・実行可能。`npm run test:conformance` で走り、エンドポイント未実装のため現状 **red**（18 中ほぼ全て fail）。これが「FAPI conformance を実行して失敗する」状態。CI では gated な `conformance.yml` の最初のステップで実行。
-- **Layer 2（external OpenID Suite）**: **P1 完了後の runner 実走で「suite が公式 FAPI2 SP final プランを AS に対して生成」まで到達**。
+- **Layer 2（external OpenID Suite）**: **`conformance.yml`（runner）で FAPI2 SP final プランを AS に対して end-to-end 実走し、P1 の到達可能範囲を green 化**。
   - **イメージは publish 済み**：`conformance-image.yml` が upstream `release-v5.1.45` をビルドし、`ghcr.io/watahani/conformance-suite-{server,httpd}:pinned`（GHCR private）へ push、かつ tarball を artifact 出力。
-  - **runner 実走（`conformance.yml`）で確認済みの動作**（P1 完了時点）：
-    1. suite（mongodb/server/httpd）が起動（`docker-compose.yml` に server の起動 env = devmode + OIDC ダミーを追加して 502 を解消）。
-    2. `run-conformance.sh` が AS discovery を取得（**discovery ゲート通過** — P1 前はここで red）。
-    3. Suite API で **`fapi2-security-profile-final-test-plan`（openid_connect + private_key_jwt + dpop, plain_fapi）を作成成功（HTTP 201, 57 モジュール）**。variant は plan が固定する `fapi_request_method`/`fapi_response_mode` を送らず、必須の `openid` を指定。
-  - **green までの残タスク**（下記 TODO 1–3）：モジュール実行には suite→AS 到達性・**FAPI が要求する AS の TLS**・**静的クライアント登録**が必要。
+  - **構成**（`docker-compose.yml`）：suite（mongodb/server/httpd）+ AS + postgres を同一 docker ネットワークで起動。AS は `https://as:8443` を自己署名 TLS（`gen-certs.sh`）で提供し、suite server は CA を PKCS12 truststore で信頼。静的クライアント（`conformance-client.json`、公開 JWKS + suite callback、対応秘密鍵は `test-config.json`）を `seed:clients` で投入。認可リダイレクトは dev 自動認証で即 303 するため、`run-conformance.sh` が WAITING 時にヘッドレス Chromium（`drive-browser.mjs`）で追従して flow を完了。
+  - **実走結果（P1 完了時点・overall=PASS）**：**48 PASSED / 2 SKIPPED / 6 想定 non-pass**（`run-conformance.sh` は想定 non-pass で run を落とさない）。
+    - discovery-endpoint-verification、happy-flow、DPoP（proof/jkt/nonce/iat/ath・mismatch 各種）、PKCE（必須・不正 verifier・plain 拒否）、PAR（aud/audience 各種・invalid method・duplicate params）、client-assertion（aud/exp/sub 各種）、refresh、期限切れ auth code 拒否、userinfo(RS DPoP) などが PASS。
+    - **想定 non-pass（`EXPECTED_NONPASS`）は 2 種**：
+      1. **対話系（P2 で解消）**：`user-rejects-authentication`（ユーザーが拒否する必要）、`par-ensure-reused-request-uri-prior-to-auth-completion-succeeds`（初回訪問で認証を完了しない必要）。P1 の dev 自動認証（常に承認・即認証）では原理的に生成できない → P2（外部 IdP 委譲 + consent UI）。
+      2. **非リダイレクトのエラーページ（harness 制約）**：`ensure-unsigned-authorization-request-without-using-par-fails` / `par-attempt-reuse-request_uri` / `par-attempt-to-use-expired-request_uri` / `par-attempt-to-use-request_uri-for-different-client`。AS は（信頼できる redirect_uri が無いため）正しく **400 エラーページ**で拒否するが、suite は callback 経由でしか結果を観測できず、外部ヘッドレスブラウザに返るエラーページを検出できないため WAITING になる。**AS の拒否挙動は Layer 1（`test/conformance/fapi2-sp.test.ts` + unit）で直接アサート済み**。
+    - SKIPPED：`test-claims-parameter-identity-claims`（claims パラメータ設定が任意）、`ensure-signed-client-assertion-with-RS256-fails`（テスト鍵が EC のため suite が RS256 assertion を生成できずスキップ。AS 側は ES256/PS256/EdDSA のみ受理で RS256 は拒否）。
   - **sandbox k3s 実走は当面不可**：`--snapshotter=fuse-overlayfs` 必須（`dev-cluster.sh` 修正済み）だが起動中 k3s を再起動できず（sudo 制約）本セッションでは不可。rebuild で解消。private GHCR は pull 不可なので k3s では tarball を `ctr import`（`k8s/suite.yaml` 参照）。
 
-## green までの残タスク（P3）
+## 残タスク
 
-1. **suite→AS 到達性 + TLS**：suite の server コンテナから AS へ到達させる（compose 内に AS を同一ネットワークで起動 等）。FAPI は AS の **https** を要求するため、AS を自己署名 TLS で提供し suite の truststore に信頼させる（または suite の TLS 検証設定を調整）。ISSUER の https 化に伴い `src/index.ts` に任意 TLS を追加。
-2. **静的クライアント登録**：suite が使うクライアント鍵（`test-config.json` の `client.jwks` に秘密鍵）と対応する公開 JWKS・`redirect_uris`（`https://<suite>/test/a/<alias>/callback`）を AS に `npm run seed:clients` で投入。動的登録は未実装（P2+）。
-3. **認可インタラクション**：本 AS は dev 自動認証（UI なし）で `/authorize` が即 303 → code。suite の自動ブラウザがリダイレクトを追えるか確認し、必要なら調整。
-4. green を CI 必須化（push/PR トリガー）。
+1. **P2 で `EXPECTED_NONPASS` の 2 件を解消**：実ユーザー認証・consent UI・拒否パスを実装し、allowlist から外して全モジュール pass を要求する。
+2. RS256 client-assertion 拒否を suite でも実行する場合は、テストクライアントに RSA 鍵を追加（AS 側の拒否は Layer 1 で担保済み）。
+3. green を CI 必須化（push/PR トリガー追加）。

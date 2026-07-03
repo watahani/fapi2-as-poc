@@ -22,6 +22,7 @@ export function buildMetadata(config: AppConfig): Record<string, unknown> {
     authorization_endpoint: urls.authorization,
     token_endpoint: urls.token,
     jwks_uri: urls.jwks,
+    userinfo_endpoint: urls.userinfo,
     pushed_authorization_request_endpoint: urls.par,
     revocation_endpoint: urls.revocation,
     introspection_endpoint: urls.introspection,
@@ -30,7 +31,7 @@ export function buildMetadata(config: AppConfig): Record<string, unknown> {
     grant_types_supported: ["authorization_code", "refresh_token"],
     // OIDC-15: public subject identifiers.
     subject_types_supported: ["public"],
-    scopes_supported: ["openid"],
+    scopes_supported: ["openid", "profile"],
     claims_supported: ["sub", "iss", "aud", "exp", "iat", "auth_time", "nonce"],
     // DISC-8: ES256 only — deliberate FAPI2 deviation from OIDD's RS256 MUST
     // (docs/REQUIREMENTS-P1.md §14).

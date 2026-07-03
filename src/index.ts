@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyInstance } from "fastify";
 import { loadConfig, type AppConfig } from "./config.js";
@@ -29,7 +30,31 @@ export function buildApp(deps: AppDeps = {}): FastifyInstance {
     (config.storage === "postgres"
       ? createPgStorage(getPool(config.databaseUrl, { ssl: config.databaseSsl }))
       : createMemoryStorage());
+  // FAPI mandates TLS. Normally a proxy terminates it; when TLS files are
+  // configured the AS serves https directly (used by the conformance harness).
+  // FAPI2 §5.2.2: with TLS 1.2 only BCP195 (RFC 9325) recommended cipher
+  // suites are permitted; TLS 1.3's suites are all acceptable.
+  const https = config.tls
+    ? {
+        key: readFileSync(config.tls.keyFile),
+        cert: readFileSync(config.tls.certFile),
+        minVersion: "TLSv1.2" as const,
+        honorCipherOrder: true,
+        ciphers: [
+          "ECDHE-ECDSA-AES128-GCM-SHA256",
+          "ECDHE-RSA-AES128-GCM-SHA256",
+          "ECDHE-ECDSA-AES256-GCM-SHA384",
+          "ECDHE-RSA-AES256-GCM-SHA384",
+          "ECDHE-ECDSA-CHACHA20-POLY1305",
+          "ECDHE-RSA-CHACHA20-POLY1305",
+          "DHE-RSA-AES128-GCM-SHA256",
+          "DHE-RSA-AES256-GCM-SHA384",
+        ].join(":"),
+      }
+    : null;
+
   const app = Fastify({
+    ...(https ? { https } : {}),
     logger: {
       level: config.logLevel,
       // Never let credentials reach log aggregation, including via future

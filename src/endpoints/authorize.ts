@@ -24,7 +24,12 @@ import {
   InvalidClientMetadataError,
   type Client,
 } from "../domain/clients.js";
-import { AuthorizeError, OAuthError, type AuthorizeErrorCode } from "../domain/errors.js";
+import {
+  AuthorizeError,
+  OAuthError,
+  sanitizeErrorDescription,
+  type AuthorizeErrorCode,
+} from "../domain/errors.js";
 import { issueAuthorizationCode } from "../domain/grant.js";
 import { authenticateUser, decideAuthorization } from "../domain/interaction.js";
 import type { EndpointDeps } from "./index.js";
@@ -177,7 +182,7 @@ function errorPage(reply: FastifyReply, error: AuthorizeErrorCode, description: 
   return reply
     .header("cache-control", "no-store")
     .code(400)
-    .send({ error, error_description: description });
+    .send({ error, error_description: sanitizeErrorDescription(description) });
 }
 
 function redirectError(
@@ -190,7 +195,7 @@ function redirectError(
 ): FastifyReply {
   const location = buildRedirect(redirectUri, {
     error,
-    ...(description ? { error_description: description } : {}),
+    ...(description ? { error_description: sanitizeErrorDescription(description) } : {}),
     ...(state !== undefined ? { state } : {}),
     iss,
   });

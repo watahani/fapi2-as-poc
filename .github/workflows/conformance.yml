@@ -4,19 +4,17 @@ name: fapi-conformance
 #   Layer 1 (in-repo): `npm run test:conformance` drives the AS over HTTP and
 #     asserts FAPI2 SP behaviour. No Docker / no external suite — runs anywhere.
 #   Layer 2 (external): the OpenID Conformance Suite from PREBUILT images
-#     (pulled, NOT built here) — built once by conformance-image.yml. CI runners
-#     (have docker) use compose; the devcontainer sandbox (no docker) uses k3s
-#     via deploy/conformance/run-local.sh.
+#     (pulled, NOT built here) drives the AS end-to-end. The AS + postgres run
+#     in the same compose network as the suite; the AS serves https with a
+#     self-signed cert the suite is configured to trust.
 #
-# GATED: AS protocol endpoints land in P1. Manual-only until P3; then add
-# push/PR triggers and finalize deploy/conformance/. Layer 1 already runs and is
-# RED by design until the endpoints exist.
+# GATED: manual (workflow_dispatch) while Layer 2 is being finalised.
 on:
   workflow_dispatch:
     inputs:
-      issuer:
-        description: "Issuer URL the suite should test"
-        default: "http://localhost:3000"
+      module_filter:
+        description: "Optional grep -E pattern to run a subset of modules (debug)"
+        default: ""
 
 permissions:
   contents: read
@@ -25,21 +23,9 @@ permissions:
 jobs:
   conformance:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_DB: authserver
-          POSTGRES_USER: authserver
-          POSTGRES_PASSWORD: conformance
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U authserver"
-          --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      DATABASE_URL: postgresql://authserver:conformance@localhost:5432/authserver
-      ISSUER: ${{ inputs.issuer }}
       SUITE_URL: https://localhost:8443
+      ISSUER: https://as:8443
       CONFORMANCE_SERVER_IMAGE: ghcr.io/${{ github.repository_owner }}/conformance-suite-server:pinned
       CONFORMANCE_HTTPD_IMAGE: ghcr.io/${{ github.repository_owner }}/conformance-suite-httpd:pinned
     steps:
@@ -49,49 +35,70 @@ jobs:
           node-version: "24"
           cache: "npm"
       - run: npm ci
+      - run: npm run build
 
-      # Layer 1 — in-repo FAPI 2.0 SP conformance (no Docker, no external suite).
-      # Drives the AS directly and asserts FAPI2 SP behaviour. RED until P1
-      # implements the endpoints; this is the fast, always-runnable gate.
-      # continue-on-error pre-P1 so the run still exercises Layer 2 (suite boot).
-      # TODO(P1): drop continue-on-error to make this a hard gate.
+      # Layer 1 — in-repo FAPI 2.0 SP conformance (no Docker). Green, hard gate.
       - name: In-repo FAPI 2.0 SP conformance
-        continue-on-error: true
         run: npm run test:conformance
 
-      - run: npm run build
-      - name: Apply migrations
-        run: npm run migrate
-      - name: Start AS
+      # Headless browser to complete the suite's JS-based authorization callback
+      # (installed here only — the AS image never ships it).
+      - name: Install headless browser (Playwright chromium)
         run: |
-          node --max-old-space-size=256 dist/index.js &
-          for _ in $(seq 1 30); do curl -sf http://localhost:3000/health && break; sleep 1; done
+          npm i --no-save playwright@1.48.0
+          npx playwright install --with-deps chromium
 
-      # Suite from prebuilt images — pull only, no build.
+      # TLS material for the AS + a truststore the suite server trusts.
+      - name: Generate conformance TLS certs
+        run: bash deploy/conformance/gen-certs.sh
+
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Start conformance suite (prebuilt)
-        run: docker compose -f deploy/conformance/docker-compose.yml up -d --pull always
-      - name: Wait for suite to be ready
+
+      # Bring up postgres first so migrations + client seeding run before the AS.
+      - name: Start postgres
+        run: docker compose -f deploy/conformance/docker-compose.yml up -d --pull always postgres
+      - name: Migrate + seed conformance client
+        env:
+          STORAGE: postgres
+          DATABASE_URL: postgresql://authserver:conformance@localhost:5432/authserver
         run: |
-          ready=
-          for _ in $(seq 1 80); do
-            if curl -ksf --connect-timeout 5 --max-time 10 https://localhost:8443/api/runner/available; then
-              echo; echo "suite ready"; ready=1; break
-            fi
+          for _ in $(seq 1 30); do pg_isready -h localhost -U authserver && break; sleep 1; done
+          npm run migrate
+          npm run seed:clients -- deploy/conformance/conformance-client.json
+
+      - name: Start AS + conformance suite
+        run: docker compose -f deploy/conformance/docker-compose.yml up -d --pull always
+
+      - name: Wait for AS and suite to be ready
+        run: |
+          as_ok=; suite_ok=
+          for _ in $(seq 1 40); do
+            curl -ksf --max-time 5 https://localhost:3000/health && { as_ok=1; break; }
             sleep 3
           done
-          docker compose -f deploy/conformance/docker-compose.yml ps
-          if [ -z "$ready" ]; then
-            echo "::error::conformance suite did not become ready; server logs:"
-            docker compose -f deploy/conformance/docker-compose.yml logs --tail=200 server
+          for _ in $(seq 1 80); do
+            curl -ksf --max-time 10 https://localhost:8443/api/runner/available && { suite_ok=1; break; }
+            sleep 3
+          done
+          echo; docker compose -f deploy/conformance/docker-compose.yml ps
+          if [ -z "$as_ok" ] || [ -z "$suite_ok" ]; then
+            echo "::error::AS ready=$as_ok suite ready=$suite_ok"
+            docker compose -f deploy/conformance/docker-compose.yml logs --tail=200 as server
             exit 1
           fi
+
       - name: Run FAPI 2.0 SP test plan
+        env:
+          MODULE_FILTER: ${{ inputs.module_filter }}
         run: bash deploy/conformance/run-conformance.sh
+
+      - name: Dump AS logs on failure
+        if: failure()
+        run: docker compose -f deploy/conformance/docker-compose.yml logs --tail=300 as server
 
       - uses: actions/upload-artifact@v4
         if: always()

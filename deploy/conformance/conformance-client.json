@@ -1,0 +1,74 @@
+[
+  {
+    "//": "Static conformance client seeded into the AS (npm run seed:clients). The matching PRIVATE key lives in test-config.json (the suite signs client assertions with it). Test-only key pair \u2014 safe to commit for the harness.",
+    "client_id": "conformance-test-client",
+    "client_name": "OpenID Conformance Suite",
+    "metadata": {
+      "token_endpoint_auth_method": "private_key_jwt",
+      "grant_types": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "response_types": [
+        "code"
+      ],
+      "scope": "openid profile",
+      "dpop_bound_access_tokens": true,
+      "redirect_uris": [
+        "https://localhost:8443/test/a/fapi2-as-poc/callback",
+        "https://localhost:8443/test/a/fapi2-as-poc/callback?dummy1=lorem&dummy2=ipsum",
+        "https://localhost.emobix.co.uk:8443/test/a/fapi2-as-poc/callback",
+        "https://localhost.emobix.co.uk:8443/test/a/fapi2-as-poc/callback?dummy1=lorem&dummy2=ipsum"
+      ],
+      "jwks": {
+        "keys": [
+          {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "AJpvhirE8UA7dir1Vz1lPcS73CuBCC4xusUJnsKHNR8",
+            "y": "iTadyXKDDiUZJEDUDeWEejDl5Y7iwTPHZiLoryW3thM",
+            "kid": "Af_DqdbiEihJ6m47pxrmsaQYgRJyak4iRPWgIFDl3OE",
+            "alg": "ES256",
+            "use": "sig"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "//": "Second client (client2) \u2014 some FAPI2 modules use two clients (e.g. code-bound-to-client). Test-only key.",
+    "client_id": "conformance-test-client-2",
+    "client_name": "OpenID Conformance Suite (client2)",
+    "metadata": {
+      "token_endpoint_auth_method": "private_key_jwt",
+      "grant_types": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "response_types": [
+        "code"
+      ],
+      "scope": "openid profile",
+      "dpop_bound_access_tokens": true,
+      "redirect_uris": [
+        "https://localhost:8443/test/a/fapi2-as-poc/callback",
+        "https://localhost:8443/test/a/fapi2-as-poc/callback?dummy1=lorem&dummy2=ipsum",
+        "https://localhost.emobix.co.uk:8443/test/a/fapi2-as-poc/callback",
+        "https://localhost.emobix.co.uk:8443/test/a/fapi2-as-poc/callback?dummy1=lorem&dummy2=ipsum"
+      ],
+      "jwks": {
+        "keys": [
+          {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "XaghXDAZ_yv0pRt4e_bGri9OQNbIsMfL-kkV5WO_f_s",
+            "y": "ThMtFWe8xTRNeDNoH3ul49jkOb2jkGKlMGxDa9uS-Xw",
+            "kid": "GpFOP7G8TeYm_neJyRFeqShkRMhKUPmu35ODm9wto0Q",
+            "alg": "ES256",
+            "use": "sig"
+          }
+        ]
+      }
+    }
+  }
+]

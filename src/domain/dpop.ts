@@ -21,13 +21,18 @@ import { FAPI2_JWS_ALGS } from "../crypto/jws.js";
 import { invalidDpopProof, useDpopNonce } from "./errors.js";
 
 export interface DpopContext {
-  /** HTTP method of the token request (RFC 9449 §4.2 htm). Always POST here. */
+  /** HTTP method of the request (RFC 9449 §4.2 htm). */
   htm: string;
-  /** Canonical token endpoint URL (issuer-derived, not request-derived). */
+  /** Canonical endpoint URL (issuer-derived, not request-derived). */
   htu: string;
   config: AppConfig;
   storage: Storage;
   now?: Date;
+  /** Resource-server use (RFC 9449 §7): the proof MUST carry `ath` equal to
+   * this base64url SHA-256 hash of the presented access token. */
+  ath?: string;
+  /** Replay-guard context override (defaults to the token endpoint scope). */
+  replayContext?: string;
 }
 
 export interface DpopResult {
@@ -100,12 +105,13 @@ export async function verifyDpopProof(
   }
 
   // §4.3 step 3: required claims present.
-  const { jti, htm, htu, iat, nonce } = payload as {
+  const { jti, htm, htu, iat, nonce, ath } = payload as {
     jti?: unknown;
     htm?: unknown;
     htu?: unknown;
     iat?: unknown;
     nonce?: unknown;
+    ath?: unknown;
   };
   if (typeof jti !== "string" || jti.length === 0) {
     throw invalidDpopProof("DPoP proof jti required [RFC9449 §4.2]");
@@ -130,6 +136,12 @@ export async function verifyDpopProof(
     throw invalidDpopProof("DPoP proof has expired [RFC9449 §11.1]");
   }
 
+  // §4.3 step 12 (RS use): the proof MUST bind the presented access token via
+  // `ath` = base64url(SHA-256(access token)).
+  if (ctx.ath !== undefined && ath !== ctx.ath) {
+    throw invalidDpopProof("DPoP proof ath does not match the access token [RFC9449 §4.3, §7]");
+  }
+
   const jkt = await calculateJwkThumbprint(jwk, "sha256");
 
   // §8 nonce mechanism (default off, FAPI2 5.3.2.1(10) is MAY). When enabled,
@@ -146,7 +158,7 @@ export async function verifyDpopProof(
   // the proof key + endpoint. base64url-joined so the pg text key is NUL-free.
   const replayId = `${jkt}.${Buffer.from(jti, "utf8").toString("base64url")}`;
   const fresh = await ctx.storage.jti.register(
-    `dpop:${normalizeHtu(ctx.htu)}`,
+    ctx.replayContext ?? `dpop:${normalizeHtu(ctx.htu)}`,
     replayId,
     new Date((iat + ctx.config.dpopProofMaxAgeSec + ctx.config.clockSkewFutureAcceptSec) * 1000),
     now,

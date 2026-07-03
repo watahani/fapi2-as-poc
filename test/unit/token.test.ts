@@ -12,6 +12,7 @@ import { createMemoryStorage } from "../../src/db/repositories/memory.js";
 import type { Storage } from "../../src/db/repositories/types.js";
 import {
   ASSERTION_TYPE,
+  accessTokenHash,
   createDpopKey,
   createTestClient,
   form,
@@ -250,6 +251,98 @@ describe("POST /token — authorization_code grant", () => {
     });
     expect(res.statusCode).toBe(400);
     expect((res.json() as { error: string }).error).toBe("invalid_dpop_proof");
+  });
+});
+
+describe("GET /userinfo — DPoP-bound resource access [RFC9449 §7]", () => {
+  async function issue(): Promise<{ accessToken: string; dpop: DpopKey }> {
+    const dpop = await createDpopKey();
+    const code = await getCode({}, dpop.jkt);
+    const res = await token(
+      { grant_type: "authorization_code", code, redirect_uri: client.redirectUri, code_verifier: VERIFIER },
+      { dpop },
+    );
+    return { accessToken: (res.json() as { access_token: string }).access_token, dpop };
+  }
+
+  const USERINFO = `${ISSUER}/userinfo`;
+
+  it("returns the subject for a valid DPoP-bound access token", async () => {
+    const { accessToken, dpop } = await issue();
+    const res = await app.inject({
+      method: "GET",
+      url: "/userinfo",
+      headers: {
+        authorization: `DPoP ${accessToken}`,
+        dpop: await dpop.proof({ htm: "GET", htu: USERINFO, ath: accessTokenHash(accessToken) }),
+      },
+    });
+    expect(res.statusCode, res.payload).toBe(200);
+    expect((res.json() as { sub: string }).sub).toBe(config.devInteractionSub);
+  });
+
+  it("challenges (401 DPoP) when no token is presented [RFC9449 §7.1]", async () => {
+    const res = await app.inject({ method: "GET", url: "/userinfo" });
+    expect(res.statusCode).toBe(401);
+    expect(String(res.headers["www-authenticate"])).toMatch(/^DPoP/);
+  });
+
+  it("rejects a DPoP-bound token presented as Bearer [RFC9449 §7.2]", async () => {
+    const { accessToken } = await issue();
+    const res = await app.inject({
+      method: "GET",
+      url: "/userinfo",
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("rejects a proof with the wrong ath [RFC9449 §4.3, §7]", async () => {
+    const { accessToken, dpop } = await issue();
+    const res = await app.inject({
+      method: "GET",
+      url: "/userinfo",
+      headers: {
+        authorization: `DPoP ${accessToken}`,
+        dpop: await dpop.proof({ htm: "GET", htu: USERINFO, ath: "wrong-hash" }),
+      },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(String(res.headers["www-authenticate"])).toMatch(/invalid_dpop_proof/);
+  });
+
+  it("rejects access with a different DPoP key than the token binding [RFC9449 §7.1]", async () => {
+    const { accessToken } = await issue();
+    const other = await createDpopKey();
+    const res = await app.inject({
+      method: "GET",
+      url: "/userinfo",
+      headers: {
+        authorization: `DPoP ${accessToken}`,
+        dpop: await other.proof({ htm: "GET", htu: USERINFO, ath: accessTokenHash(accessToken) }),
+      },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("rejects a revoked access token", async () => {
+    const { accessToken, dpop } = await issue();
+    // Revoke via the revocation endpoint, then userinfo must reject it.
+    await app.inject({
+      method: "POST",
+      url: "/revoke",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: form({ ...(await auth()), token: accessToken, token_type_hint: "access_token" }),
+    });
+    const res = await app.inject({
+      method: "GET",
+      url: "/userinfo",
+      headers: {
+        authorization: `DPoP ${accessToken}`,
+        dpop: await dpop.proof({ htm: "GET", htu: USERINFO, ath: accessTokenHash(accessToken) }),
+      },
+    });
+    expect(res.statusCode).toBe(401);
   });
 });
 

@@ -11,6 +11,7 @@ import { registerAuthorize } from "./authorize.js";
 import { registerToken } from "./token.js";
 import { registerRevoke } from "./revoke.js";
 import { registerIntrospect } from "./introspect.js";
+import { registerUserinfo } from "./userinfo.js";
 import { FixedWindowRateLimiter } from "./rate-limit.js";
 
 export interface EndpointDeps {
@@ -47,6 +48,12 @@ export function registerEndpoints(app: FastifyInstance, input: EndpointDepsInput
   // WWW-Authenticate (invalid_client) and DPoP-Nonce (use_dpop_nonce).
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof OAuthError) {
+      // Audit the rejection server-side (never leaked to the client beyond the
+      // spec error body).
+      req.log.info(
+        { audit: "oauth_error", url: req.url, error: err.error, error_description: err.description },
+        "oauth error",
+      );
       void reply
         .headers({ "cache-control": "no-store", pragma: "no-cache", ...err.headers })
         .code(err.status)
@@ -85,4 +92,5 @@ export function registerEndpoints(app: FastifyInstance, input: EndpointDepsInput
   registerToken(app, deps);
   registerRevoke(app, deps);
   registerIntrospect(app, deps);
+  registerUserinfo(app, deps);
 }

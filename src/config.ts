@@ -75,6 +75,12 @@ const schema = z.object({
   // trusted hop(s) so req.ip is the real client (else all traffic shares one
   // rate-limit bucket). Accepts "true"/"false"/hop-count/CIDR list.
   TRUST_PROXY: z.string().default("false"),
+
+  // Optional in-process TLS (PEM file paths). FAPI mandates TLS; in most
+  // deployments a proxy/ingress terminates it, but for the conformance
+  // harness the AS serves https directly. Both must be set to enable.
+  TLS_CERT_FILE: z.string().default(""),
+  TLS_KEY_FILE: z.string().default(""),
 });
 
 export type AppConfig = Readonly<{
@@ -102,6 +108,8 @@ export type AppConfig = Readonly<{
   rateLimitPerMin: number;
   /** Fastify trustProxy value: false, true, a hop count, or a CIDR list. */
   trustProxy: boolean | number | string;
+  /** PEM file paths for in-process TLS, or undefined to serve plain HTTP. */
+  tls: Readonly<{ certFile: string; keyFile: string }> | undefined;
   /** Decoded key-encryption key (32 bytes) or undefined when not configured. */
   keystoreKek: Buffer | undefined;
   /** Dev-grade settings in effect (empty in production — the guard threw). */
@@ -192,6 +200,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     accessTokenAudience: parsed.ACCESS_TOKEN_AUDIENCE || issuer,
     rateLimitPerMin: parsed.RATE_LIMIT_PER_MIN,
     trustProxy: parseTrustProxy(parsed.TRUST_PROXY),
+    tls:
+      parsed.TLS_CERT_FILE && parsed.TLS_KEY_FILE
+        ? { certFile: parsed.TLS_CERT_FILE, keyFile: parsed.TLS_KEY_FILE }
+        : undefined,
     keystoreKek,
     devModeWarnings: devGrade,
   };
@@ -231,6 +243,7 @@ export function endpointPaths(config: AppConfig) {
     jwks: `${prefix}/jwks`,
     revocation: `${prefix}/revoke`,
     introspection: `${prefix}/introspect`,
+    userinfo: `${prefix}/userinfo`,
   } as const;
 }
 
@@ -246,5 +259,6 @@ export function endpointUrls(config: AppConfig) {
     jwks: `${origin}${paths.jwks}`,
     revocation: `${origin}${paths.revocation}`,
     introspection: `${origin}${paths.introspection}`,
+    userinfo: `${origin}${paths.userinfo}`,
   } as const;
 }
