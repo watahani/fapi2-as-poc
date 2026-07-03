@@ -9,6 +9,7 @@ import type { Storage } from "./db/repositories/types.js";
 import { KeyStore } from "./crypto/keys.js";
 import { registerEndpoints } from "./endpoints/index.js";
 import { MockPdp } from "./authz/adapters/mock.js";
+import { AuthZenHttpPdp } from "./authz/adapters/authzen-http.js";
 import type { PolicyDecisionPoint } from "./authz/pdp.js";
 import { DevLoginProvider, type AuthenticationProvider } from "./domain/interaction.js";
 
@@ -26,7 +27,13 @@ export interface AppDeps {
  */
 export function buildApp(deps: AppDeps = {}): FastifyInstance {
   const config = deps.config ?? loadConfig();
-  const pdp = deps.pdp ?? new MockPdp();
+  // PDP selection (docs/ARCHITECTURE.md separation 3): mock (dev allow-all) or
+  // an external AuthZEN Authorization API over HTTP. Fail-closed on outage.
+  const pdp =
+    deps.pdp ??
+    (config.pdp.kind === "authzen-http"
+      ? new AuthZenHttpPdp({ url: config.pdp.authzenUrl, token: config.pdp.authzenToken })
+      : new MockPdp());
   const storage =
     deps.storage ??
     (config.storage === "postgres"
