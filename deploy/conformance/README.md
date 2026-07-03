@@ -36,15 +36,18 @@ Suite は **一度だけビルドして GHCR に publish**（`.github/workflows/
 ## 有効化ステータス
 
 - **Layer 1（in-repo）**: 実装済み・実行可能。`npm run test:conformance` で走り、エンドポイント未実装のため現状 **red**（18 中ほぼ全て fail）。これが「FAPI conformance を実行して失敗する」状態。CI では gated な `conformance.yml` の最初のステップで実行。
-- **Layer 2（external OpenID Suite）**: **配線完了・runner で実走確認済み**。
-  - **イメージは publish 済み**：`conformance-image.yml` が upstream `release-v5.1.45` を自前 GitHub Actions でビルドし、`ghcr.io/watahani/conformance-suite-{server,httpd}:pinned`（GHCR private）へ push、かつ tarball を artifact 出力。
-  - **runner 実走（`conformance.yml`）で end-to-end 検証済み**：suite イメージを private GHCR から pull → 起動 → `run-conformance.sh` が discovery ゲートで `exit 1`（= P1 未実装による正当な **red**）。`PASS` には P1（PAR/authorize/token/DPoP/JWKS/Discovery）が必要。
-  - **sandbox k3s 実走は当面不可**：in-sandbox k3s は overlayfs-on-overlayfs 不可で `--snapshotter=fuse-overlayfs` が必須（`dev-cluster.sh` 修正済み）だが、起動中 k3s は root 所有・`sudo` が k3s/nerdctl/ctr のみ NOPASSWD のため**再起動できず**、本セッションでは k3s 経路を実走できなかった。コンテナ rebuild で解消。private GHCR は pull 不可なので k3s では artifact tarball を `ctr import` する（`k8s/suite.yaml` 参照）。
+- **Layer 2（external OpenID Suite）**: **P1 完了後の runner 実走で「suite が公式 FAPI2 SP final プランを AS に対して生成」まで到達**。
+  - **イメージは publish 済み**：`conformance-image.yml` が upstream `release-v5.1.45` をビルドし、`ghcr.io/watahani/conformance-suite-{server,httpd}:pinned`（GHCR private）へ push、かつ tarball を artifact 出力。
+  - **runner 実走（`conformance.yml`）で確認済みの動作**（P1 完了時点）：
+    1. suite（mongodb/server/httpd）が起動（`docker-compose.yml` に server の起動 env = devmode + OIDC ダミーを追加して 502 を解消）。
+    2. `run-conformance.sh` が AS discovery を取得（**discovery ゲート通過** — P1 前はここで red）。
+    3. Suite API で **`fapi2-security-profile-final-test-plan`（openid_connect + private_key_jwt + dpop, plain_fapi）を作成成功（HTTP 201, 57 モジュール）**。variant は plan が固定する `fapi_request_method`/`fapi_response_mode` を送らず、必須の `openid` を指定。
+  - **green までの残タスク**（下記 TODO 1–3）：モジュール実行には suite→AS 到達性・**FAPI が要求する AS の TLS**・**静的クライアント登録**が必要。
+  - **sandbox k3s 実走は当面不可**：`--snapshotter=fuse-overlayfs` 必須（`dev-cluster.sh` 修正済み）だが起動中 k3s を再起動できず（sudo 制約）本セッションでは不可。rebuild で解消。private GHCR は pull 不可なので k3s では tarball を `ctr import`（`k8s/suite.yaml` 参照）。
 
-## P3 で確定させる TODO
+## green までの残タスク（P3）
 
-1. `conformance-image.yml` で upstream（`gitlab.com/openid/conformance-suite`）の **pin tag** を確定し、server/httpd を build & push（GHCR public）。`k8s/suite.yaml` と `docker-compose.yml` の `image:` を digest で固定。
-2. テストプラン名（例 `fapi2-security-profile-final-test-plan`）と variant（fapi_profile / client_auth_type / sender_constrain / fapi_request_method）を確定。
-3. `run-conformance.sh` の自動化（Suite API で plan 作成→実行→結果取得、非 PASS で fail）を完成。
-4. 認可リダイレクト時のテストユーザー認証（外部 IdP スタブ）を用意。
-5. green を P0 一行ゴールの達成条件として CI 必須化（push/PR トリガー追加）。
+1. **suite→AS 到達性 + TLS**：suite の server コンテナから AS へ到達させる（compose 内に AS を同一ネットワークで起動 等）。FAPI は AS の **https** を要求するため、AS を自己署名 TLS で提供し suite の truststore に信頼させる（または suite の TLS 検証設定を調整）。ISSUER の https 化に伴い `src/index.ts` に任意 TLS を追加。
+2. **静的クライアント登録**：suite が使うクライアント鍵（`test-config.json` の `client.jwks` に秘密鍵）と対応する公開 JWKS・`redirect_uris`（`https://<suite>/test/a/<alias>/callback`）を AS に `npm run seed:clients` で投入。動的登録は未実装（P2+）。
+3. **認可インタラクション**：本 AS は dev 自動認証（UI なし）で `/authorize` が即 303 → code。suite の自動ブラウザがリダイレクトを追えるか確認し、必要なら調整。
+4. green を CI 必須化（push/PR トリガー）。

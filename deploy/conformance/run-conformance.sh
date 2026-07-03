@@ -42,18 +42,24 @@ if ! curl -fsS "${ISSUER%/}/.well-known/openid-configuration" -o "$OUT/discovery
   exit 1
 fi
 
-# 3) Create the test plan (config JSON is the request body).
+# 3) Create the test plan (config JSON is the request body). Capture the HTTP
+# status and raw body so a suite-side rejection is visible in the CI log
+# (the suite validates/fetches the discoveryUrl at plan creation).
 echo "[conformance] creating plan '$PLAN_NAME'..."
-plan_json="$(cs -X POST \
+plan_variant="$(jq -rn --argjson v "$VARIANT" '$v|@json|@uri')"
+plan_http="$(cs -o "$OUT/plan.json" -w '%{http_code}' -X POST \
   --data-binary @"$OUT/config.json" -H "Content-Type: application/json" \
-  "$SUITE_URL/api/plan?planName=${PLAN_NAME}&variant=$(jq -rn --argjson v "$VARIANT" '$v|@json|@uri')")"
-echo "$plan_json" > "$OUT/plan.json"
-PLAN_ID="$(echo "$plan_json" | jq -r '.id // empty')"
-[ -n "$PLAN_ID" ] || { echo "[conformance] plan creation failed: $plan_json" >&2; exit 1; }
+  "$SUITE_URL/api/plan?planName=${PLAN_NAME}&variant=${plan_variant}" || true)"
+echo "[conformance] plan create HTTP $plan_http; raw response:"
+cat "$OUT/plan.json"; echo
+PLAN_ID="$(jq -r '.id // empty' "$OUT/plan.json" 2>/dev/null || true)"
+[ -n "$PLAN_ID" ] || { echo "[conformance] plan creation failed (HTTP $plan_http)" >&2; exit 1; }
 echo "[conformance] plan id=$PLAN_ID"
 
 # 4) Run every module in the plan, polling each to completion.
-mapfile -t MODULES < <(echo "$plan_json" | jq -r '.modules[].testModule')
+mapfile -t MODULES < <(jq -r '.modules[].testModule' "$OUT/plan.json")
+echo "[conformance] plan has ${#MODULES[@]} module(s)"
+[ "${#MODULES[@]}" -gt 0 ] || { echo "[conformance] no modules in plan — aborting" >&2; exit 1; }
 fail=0
 for mod in "${MODULES[@]}"; do
   echo "[conformance] running module: $mod"
