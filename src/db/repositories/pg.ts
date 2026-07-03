@@ -103,6 +103,25 @@ class PgParRequests implements ParRequestRepository {
     );
   }
 
+  async peek(requestUri: string, now: Date): Promise<ParRequestRecord | null> {
+    const res = await this.pool.query(
+      `select request_uri, client_id, params, dpop_jkt, expires_at
+         from par_requests
+        where request_uri = $1 and consumed_at is null and expires_at > $2`,
+      [requestUri, now],
+    );
+    const row = res.rows[0];
+    return row
+      ? {
+          requestUri: row.request_uri,
+          clientId: row.client_id,
+          params: row.params,
+          dpopJkt: row.dpop_jkt,
+          expiresAt: row.expires_at,
+        }
+      : null;
+  }
+
   async consume(requestUri: string, now: Date): Promise<ParRequestRecord | null> {
     // Atomic one-time use (PAR-6): only the first caller gets the row.
     const res = await this.pool.query(

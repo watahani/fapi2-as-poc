@@ -3,11 +3,13 @@ import type { AppConfig } from "../config.js";
 import type { PolicyDecisionPoint } from "../authz/pdp.js";
 import type { Storage } from "../db/repositories/types.js";
 import type { KeyStore } from "../crypto/keys.js";
+import type { AuthenticationProvider } from "../domain/interaction.js";
 import { OAuthError } from "../domain/errors.js";
 import { registerDiscovery } from "./discovery.js";
 import { registerFormBodyParser } from "./form.js";
 import { registerPar } from "./par.js";
 import { registerAuthorize } from "./authorize.js";
+import { registerInteraction } from "./interaction.js";
 import { registerToken } from "./token.js";
 import { registerRevoke } from "./revoke.js";
 import { registerIntrospect } from "./introspect.js";
@@ -19,6 +21,8 @@ export interface EndpointDeps {
   pdp: PolicyDecisionPoint;
   storage: Storage;
   keystore: KeyStore;
+  /** End-user authentication (dev login now; external IdP later). */
+  authProvider: AuthenticationProvider;
   /** Shared across the credential-bearing endpoints so RATE_LIMIT_PER_MIN is
    * one per-source budget, not one per endpoint. */
   rateLimiter: FixedWindowRateLimiter;
@@ -101,6 +105,7 @@ export function registerEndpoints(app: FastifyInstance, input: EndpointDepsInput
   registerDiscovery(app, deps);
   registerPar(app, deps);
   registerAuthorize(app, deps);
+  registerInteraction(app, deps);
   registerToken(app, deps);
   registerRevoke(app, deps);
   registerIntrospect(app, deps);

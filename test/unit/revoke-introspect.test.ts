@@ -11,6 +11,7 @@ import { createMemoryStorage } from "../../src/db/repositories/memory.js";
 import type { Storage } from "../../src/db/repositories/types.js";
 import {
   ASSERTION_TYPE,
+  authorizeToCode,
   createDpopKey,
   createTestClient,
   form,
@@ -64,11 +65,8 @@ async function issueTokens(): Promise<{ accessToken: string; refreshToken: strin
     }),
   });
   const { request_uri } = par.json() as { request_uri: string };
-  const authz = await app.inject({
-    method: "GET",
-    url: `/authorize?client_id=${client.clientId}&request_uri=${encodeURIComponent(request_uri)}`,
-  });
-  const code = new URL(String(authz.headers.location)).searchParams.get("code")!;
+  const location = await authorizeToCode(app, { requestUri: request_uri, clientId: client.clientId });
+  const code = location.searchParams.get("code")!;
   const tok = await app.inject({
     method: "POST",
     url: "/token",

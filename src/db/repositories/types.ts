@@ -53,6 +53,13 @@ export interface ParRequestRecord {
 export interface ParRequestRepository {
   insert(rec: ParRequestRecord): Promise<void>;
   /**
+   * Non-consuming read of a live (unconsumed, unexpired) pushed request — used
+   * at the start of an interaction to validate the request and render consent
+   * WITHOUT consuming it (consumption is the authorization action). Null if
+   * missing/expired/already consumed.
+   */
+  peek(requestUri: string, now: Date): Promise<ParRequestRecord | null>;
+  /**
    * One-time-use consumption at authorization action time (RFC 9126 §4 /
    * FAPI2-AUTHZ-15). Atomic: returns the record only on first valid use;
    * expired or already-consumed URIs return null.

@@ -13,6 +13,7 @@ import type { Storage } from "../../src/db/repositories/types.js";
 import {
   ASSERTION_TYPE,
   accessTokenHash,
+  authorizeToCode,
   createDpopKey,
   createTestClient,
   form,
@@ -71,12 +72,8 @@ async function getCode(over: Record<string, string> = {}, dpopJkt?: string): Pro
   });
   expect(par.statusCode, par.payload).toBe(201);
   const { request_uri } = par.json() as { request_uri: string };
-  const authz = await app.inject({
-    method: "GET",
-    url: `/authorize?client_id=${client.clientId}&request_uri=${encodeURIComponent(request_uri)}`,
-  });
-  expect(authz.statusCode).toBe(303);
-  return new URL(String(authz.headers.location)).searchParams.get("code")!;
+  const location = await authorizeToCode(app, { requestUri: request_uri, clientId: client.clientId });
+  return location.searchParams.get("code")!;
 }
 
 async function token(

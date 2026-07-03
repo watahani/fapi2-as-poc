@@ -137,3 +137,115 @@ export async function createDpopKey(): Promise<DpopKey> {
 export function accessTokenHash(token: string): string {
   return createHash("sha256").update(token, "ascii").digest("base64url");
 }
+
+// --- Interactive authorization flow (P2) test helper ---
+
+interface Injectable {
+  inject(opts: {
+    method: string;
+    url: string;
+    headers?: Record<string, string>;
+    payload?: string;
+  }): Promise<{
+    statusCode: number;
+    headers: Record<string, unknown>;
+    payload: string;
+  }>;
+}
+
+function hidden(html: string, name: string): string {
+  const m = html.match(new RegExp(`name="${name}" value="([^"]*)"`));
+  if (!m) throw new Error(`hidden field ${name} not found in interaction HTML`);
+  return m[1].replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
+}
+
+function sessionCookieValue(setCookie: unknown): string | undefined {
+  const arr = Array.isArray(setCookie) ? setCookie : setCookie ? [String(setCookie)] : [];
+  for (const c of arr) {
+    const m = String(c).match(/(__Host-as_session=[^;]*)/);
+    if (m) return m[1];
+  }
+  return undefined;
+}
+
+/**
+ * Drive the full interactive authorization flow (GET /authorize → login →
+ * consent) and return the final redirect Location. `approve=false` denies.
+ */
+export async function authorizeToCode(
+  app: Injectable,
+  opts: { requestUri: string; clientId: string; username?: string; approve?: boolean },
+): Promise<URL> {
+  const username = opts.username ?? "dev-user";
+  const approve = opts.approve ?? true;
+
+  const start = await app.inject({
+    method: "GET",
+    url: `/authorize?client_id=${encodeURIComponent(opts.clientId)}&request_uri=${encodeURIComponent(opts.requestUri)}`,
+  });
+  if (start.statusCode !== 303) {
+    throw new Error(`authorize did not start interaction: ${start.statusCode} ${start.payload}`);
+  }
+  const interactionUrl = String(start.headers.location);
+
+  // Login page.
+  const loginPage = await app.inject({ method: "GET", url: interactionUrl });
+  const id = hidden(loginPage.payload, "interaction_id");
+  const loginRes = await app.inject({
+    method: "POST",
+    url: "/interaction/login",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    payload: form({ interaction_id: id, csrf: hidden(loginPage.payload, "csrf"), username }),
+  });
+  if (loginRes.statusCode !== 303) throw new Error(`login failed: ${loginRes.statusCode} ${loginRes.payload}`);
+  const cookie = sessionCookieValue(loginRes.headers["set-cookie"]);
+  if (!cookie) throw new Error("no session cookie set after login");
+
+  // Consent page (authenticated).
+  const consentUrl = String(loginRes.headers.location);
+  const consentPage = await app.inject({ method: "GET", url: consentUrl, headers: { cookie } });
+  const consentRes = await app.inject({
+    method: "POST",
+    url: "/interaction/consent",
+    headers: { "content-type": "application/x-www-form-urlencoded", cookie },
+    payload: form({
+      interaction_id: hidden(consentPage.payload, "interaction_id"),
+      csrf: hidden(consentPage.payload, "csrf"),
+      decision: approve ? "approve" : "deny",
+    }),
+  });
+  if (consentRes.statusCode !== 303) {
+    throw new Error(`consent did not redirect: ${consentRes.statusCode} ${consentRes.payload}`);
+  }
+  return new URL(String(consentRes.headers.location));
+}
+
+/**
+ * Establish a login session (authorize → login) against a parked request and
+ * return the session cookie, without completing consent. Used to test the
+ * prompt=none (already-authenticated) path.
+ */
+export async function getSessionCookie(
+  app: Injectable,
+  opts: { requestUri: string; clientId: string; username?: string },
+): Promise<string> {
+  const username = opts.username ?? "dev-user";
+  const start = await app.inject({
+    method: "GET",
+    url: `/authorize?client_id=${encodeURIComponent(opts.clientId)}&request_uri=${encodeURIComponent(opts.requestUri)}`,
+  });
+  const loginPage = await app.inject({ method: "GET", url: String(start.headers.location) });
+  const loginRes = await app.inject({
+    method: "POST",
+    url: "/interaction/login",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    payload: form({
+      interaction_id: hidden(loginPage.payload, "interaction_id"),
+      csrf: hidden(loginPage.payload, "csrf"),
+      username,
+    }),
+  });
+  const cookie = sessionCookieValue(loginRes.headers["set-cookie"]);
+  if (!cookie) throw new Error("no session cookie");
+  return cookie;
+}

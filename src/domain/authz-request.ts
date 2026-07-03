@@ -30,6 +30,8 @@ export interface ValidatedAuthorizationRequest {
   nonce?: string;
   dpopJkt?: string;
   prompt?: string;
+  /** Parsed max_age (seconds) — forces re-authentication when exceeded. */
+  maxAge?: number;
   /** Recognised OIDC authentication params carried through PAR to /authorize
    * (acr_values/max_age/... — dropping them would silently ignore requested
    * authentication context, RFC 9126 §2.2). */
@@ -164,6 +166,14 @@ export function validateAuthorizationRequest(
     }
   }
 
+  // max_age (OIDC §3.1.2.1): non-negative integer seconds; forces re-auth.
+  let maxAge: number | undefined;
+  const maxAgeRaw = param(body, "max_age");
+  if (maxAgeRaw !== undefined) {
+    if (!/^\d+$/.test(maxAgeRaw)) throw invalidRequest("malformed max_age [OIDC §3.1.2.1]");
+    maxAge = Number(maxAgeRaw);
+  }
+
   return {
     clientId: client.clientId,
     responseType: "code",
@@ -175,6 +185,7 @@ export function validateAuthorizationRequest(
     nonce,
     dpopJkt,
     prompt,
+    maxAge,
     passthrough,
   };
 }
