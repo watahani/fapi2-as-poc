@@ -1,7 +1,11 @@
 import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyInstance } from "fastify";
 import { loadConfig, type AppConfig } from "./config.js";
-import { getPool, pingDb } from "./db/pool.js";
+import { getPool } from "./db/pool.js";
+import { createMemoryStorage } from "./db/repositories/memory.js";
+import { createPgStorage } from "./db/repositories/pg.js";
+import type { Storage } from "./db/repositories/types.js";
+import { KeyStore } from "./crypto/keys.js";
 import { registerEndpoints } from "./endpoints/index.js";
 import { MockPdp } from "./authz/adapters/mock.js";
 import type { PolicyDecisionPoint } from "./authz/pdp.js";
@@ -9,38 +13,88 @@ import type { PolicyDecisionPoint } from "./authz/pdp.js";
 export interface AppDeps {
   config?: AppConfig;
   pdp?: PolicyDecisionPoint;
+  storage?: Storage;
 }
 
 /**
- * P0 skeleton: boots Fastify and wires the config, DB pool, and the
- * separation boundaries (PDP for authZ, endpoints for the protocol engine).
- * The FAPI 2.0 protocol implementation is added in src/endpoints + src/domain
- * during P1.
+ * Boots Fastify and wires the separation boundaries: config, storage (memory
+ * for tests / postgres in deployment), the ES256 keystore, the PDP (authZ
+ * delegation), and the protocol endpoints (src/endpoints + src/domain).
  */
 export function buildApp(deps: AppDeps = {}): FastifyInstance {
   const config = deps.config ?? loadConfig();
   const pdp = deps.pdp ?? new MockPdp();
-  const pool = getPool(config.databaseUrl, { ssl: config.databaseSsl });
-
+  const storage =
+    deps.storage ??
+    (config.storage === "postgres"
+      ? createPgStorage(getPool(config.databaseUrl, { ssl: config.databaseSsl }))
+      : createMemoryStorage());
   const app = Fastify({
-    logger: { level: config.logLevel },
-    // FAPI flows carry large signed request objects / DPoP proofs.
+    logger: {
+      level: config.logLevel,
+      // Never let credentials reach log aggregation, including via future
+      // request logging (Authorization/DPoP headers, cookies). pino '*'
+      // covers one level, so body paths are listed explicitly; the standing
+      // rule is: never log raw request bodies.
+      redact: {
+        paths: [
+          "req.headers.authorization",
+          "req.headers.dpop",
+          "req.headers.cookie",
+          "req.body.client_assertion",
+          "*.client_assertion",
+          "*.privateJwk",
+          "err.record.privateJwk",
+        ],
+        remove: true,
+      },
+    },
+    // FAPI flows carry signed request objects / DPoP proofs; PAR requests
+    // beyond this bound get 413 (RFC 9126 §2.3).
     bodyLimit: 256 * 1024,
   });
+
+  const keystore = new KeyStore(storage.keys, {
+    kek: config.keystoreKek,
+    warn: (msg) => app.log.warn({ security: "keystore" }, msg),
+  });
+
+  // An unset NODE_ENV must not silently run with dev-grade security (the
+  // production guard only throws when NODE_ENV=production).
+  for (const warning of config.devModeWarnings) {
+    app.log.warn({ security: "dev-mode" }, warning);
+  }
 
   // Liveness: the process is up.
   app.get("/health", async () => ({ status: "ok" }));
 
-  // Readiness: dependencies are reachable. Kept minimal — no config/issuer/pdp
-  // disclosure to unauthenticated callers.
+  // Readiness: the domain storage actually wired into the endpoints is
+  // usable. Kept minimal — no config/issuer/pdp disclosure to unauthenticated
+  // callers. `storage` names the backend so a misconfigured non-durable
+  // deployment is observable.
+  // The ping is cached briefly AND deduplicated in flight so unauthenticated
+  // probe traffic cannot amplify load onto a slow/down DB.
+  let lastPing: { at: number; up: boolean } | undefined;
+  let pendingPing: Promise<boolean> | undefined;
   app.get("/healthz", async (_req, reply) => {
-    const dbUp = await pingDb(pool);
+    if (!lastPing || Date.now() - lastPing.at > 2000) {
+      pendingPing ??= storage.ping().then((up) => {
+        lastPing = { at: Date.now(), up };
+        pendingPing = undefined;
+        return up;
+      });
+      await pendingPing;
+    }
+    const dbUp = (lastPing as { up: boolean }).up;
     reply.code(dbUp ? 200 : 503);
-    return { status: dbUp ? "ok" : "degraded", db: dbUp ? "up" : "down" };
+    return {
+      status: dbUp ? "ok" : "degraded",
+      db: dbUp ? "up" : "down",
+      storage: deps.storage ? "injected" : config.storage,
+    };
   });
 
-  // Protocol engine boundary (no-op in P0).
-  registerEndpoints(app, { config, pdp, pool });
+  registerEndpoints(app, { config, pdp, storage, keystore });
 
   return app;
 }
