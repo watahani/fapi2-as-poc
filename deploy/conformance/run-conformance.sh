@@ -66,22 +66,32 @@ mapfile -t MODULES < <(jq -r '.modules[].testModule' "$OUT/plan.json" | { [ -n "
 echo "[conformance] plan has ${#MODULES[@]} module(s)${MODULE_FILTER:+ (filter: $MODULE_FILTER)}"
 [ "${#MODULES[@]}" -gt 0 ] || { echo "[conformance] no modules in plan — aborting" >&2; exit 1; }
 
-# Modules reported but NOT failing the run, in two groups (all verified below
-# or in the in-repo Layer 1 suite):
+# Modules reported but NOT failing the run — harness (not AS) limitations,
+# each with the AS behaviour asserted in the in-repo Layer 1 suite
+# (test/conformance/fapi2-sp.test.ts + unit tests):
 #
-# (a) INTERACTIVE — need user behaviour the P1 dev auto-authentication cannot
-#     produce (deny consent; a first authorization visit that does not complete
-#     login). Unblocked by P2 (real IdP delegation + consent UI).
+# (a) NON-REDIRECT ERROR — the AS correctly rejects with an error PAGE (it
+#     cannot redirect: the request_uri/redirect_uri is invalid/expired/for
+#     another client, or PAR was skipped, so there is no trusted redirect
+#     target). The suite observes outcomes via its callback, so a plain error
+#     page delivered to an external headless browser is not observable to it and
+#     the module stays WAITING. Covers: ensure-unsigned-...-without-using-par,
+#     par-attempt-reuse-request_uri, par-attempt-to-use-expired-request_uri,
+#     par-attempt-to-use-request_uri-for-different-client. The AS rejections are
+#     asserted in Layer 1 (PAR one-time-use / expiry / client-binding).
 #
-# (b) NON-REDIRECT ERROR — the AS correctly rejects with an error PAGE (it
-#     cannot redirect: the request_uri/redirect_uri is invalid/expired, or PAR
-#     was skipped, so there is no trusted redirect target). The suite observes
-#     outcomes via its callback, so a plain error page delivered to an external
-#     headless browser is not observable to it and the module stays WAITING.
-#     The AS behaviour for each is asserted directly in the in-repo Layer 1
-#     suite (test/conformance/fapi2-sp.test.ts + unit tests).
-EXPECTED_NONPASS="fapi2-security-profile-final-user-rejects-authentication
-fapi2-security-profile-final-par-ensure-reused-request-uri-prior-to-auth-completion-succeeds
+# (b) MULTI-VISIT BROWSER STEPPING — par-reuse-request-uri-prior-to-auth needs
+#     the browser to visit /authorize WITHOUT completing login/consent, twice,
+#     then complete; our headless driver completes the flow on first visit, so
+#     it cannot reproduce the "reuse before completion" sequence. The AS
+#     correctly keeps the request_uri live until consent (one-time-use at the
+#     authorization action) — asserted by the authorize one-time-use unit test.
+#
+# (user-rejects-authentication is now driven with a Deny click — P2 — and PASSES,
+# so it is NOT listed here.) Every listed module is verified present-and-non-
+# passing for the reason above; any OTHER non-pass fails the run (a blanket
+# exemption for unverified modules would mask real regressions).
+EXPECTED_NONPASS="fapi2-security-profile-final-par-ensure-reused-request-uri-prior-to-auth-completion-succeeds
 fapi2-security-profile-final-ensure-unsigned-authorization-request-without-using-par-fails
 fapi2-security-profile-final-par-attempt-reuse-request_uri
 fapi2-security-profile-final-par-attempt-to-use-expired-request_uri
@@ -96,8 +106,9 @@ for mod in "${MODULES[@]}"; do
 
   # AS_BROWSER_BASE is where the AS is reachable from THIS script (the suite
   # gives browser URLs on the in-network issuer, e.g. https://as:8443, which is
-  # not resolvable here). The AS auto-authenticates and 303s straight to the
-  # suite callback, so following redirects headlessly completes the flow.
+  # not resolvable here). The AS is interactive (P2): drive-browser.mjs logs in
+  # (dev user) and approves/denies consent, then the AS 303s to the suite
+  # callback, completing the flow.
   AS_BROWSER_BASE="${AS_BROWSER_BASE:-https://localhost:3000}"
   # Per-module budget of ~150s: completed modules break early. Some modules
   # legitimately wait out an authorization-code / request_uri expiry (tens of
@@ -126,8 +137,11 @@ for mod in "${MODULES[@]}"; do
           # The suite delivers the auth response via a JS callback page, so a
           # real browser is required; curl cannot complete the flow. Fall back
           # to curl only when the browser driver is unavailable.
-          if [ "${USE_BROWSER:-1}" = "1" ] && node "$HERE/drive-browser.mjs" "$visit"; then
-            echo "  … drove authorization URL via headless browser"
+          # The user-rejects module needs the user to DENY consent.
+          decision=approve
+          case "$mod" in *user-rejects*) decision=deny ;; esac
+          if [ "${USE_BROWSER:-1}" = "1" ] && node "$HERE/drive-browser.mjs" "$visit" "$decision"; then
+            echo "  … drove authorization URL via headless browser ($decision)"
           else
             code="$(cs -L -o /dev/null -w '%{http_code}' "$visit" || true)"
             echo "  … visited authorization URL (HTTP $code, no browser)"
@@ -147,12 +161,13 @@ for mod in "${MODULES[@]}"; do
       cs "$SUITE_URL/api/log/$MID" 2>/dev/null \
         | jq -r '.[] | select(.result=="FAILURE" or .result=="WARNING") | "    [\(.result)] \(.src): \(.msg)"' 2>/dev/null \
         | head -8 || true
-      case "$EXPECTED_NONPASS" in
-        *"$mod"*)
-          echo "    (expected non-pass in P1 — needs P2 interactive auth; not failing the run)" ;;
-        *)
-          fail=1 ;;
-      esac
+      # Exact whole-line match (not substring): a new module whose name is a
+      # prefix of an exempt one must NOT be silently exempted (see EXPECTED_NONPASS).
+      if grep -Fxq "$mod" <<<"$EXPECTED_NONPASS"; then
+        echo "    (expected non-pass — harness limitation, AS behaviour asserted in Layer 1; not failing the run)"
+      else
+        fail=1
+      fi
       ;;
   esac
 done

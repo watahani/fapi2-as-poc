@@ -110,17 +110,18 @@ jj git push --bookmark feature/p1-par      # push → PR を作成
 - **k3s は privileged 必須**（in-sandbox / DinD なし）。コンテナを信頼境界とみなす設計（host 隔離 + egress 制限済み）。起動不可ならフォールバック（サンドボックス内 postgres プロセス + Helm 静的検証）を docs/GOALS §9 で相談。
 - **in-sandbox k3s の snapshotter**：overlayfs-on-overlayfs が不可（`failed to mount overlay: invalid argument`）でノードが登録されない。`scripts/dev-cluster.sh` は `--snapshotter=fuse-overlayfs`（イメージに同梱）で起動するよう修正済み。**注意：起動中の k3s は root 所有で、`sudo` は `k3s/nerdctl/ctr/init-firewall.sh` のみ NOPASSWD のため `pkill` 不可＝再起動できない**。誤った snapshotter で起動済みの場合はコンテナ rebuild でリセット。kubeconfig は `sudo k3s kubectl config view --raw` で取得（`sudo cat` はパスワードを要求し不可）。
 - **Conformance Suite イメージ**：`conformance-image.yml` が upstream `release-v5.1.45` を GitHub Actions でビルド→`ghcr.io/watahani/conformance-suite-{server,httpd}:pinned`（**現状 private**）へ push、かつ tarball を artifact 出力。GHCR を public 化するには packages スコープ付きトークン/UI 操作が必要（gh の現トークンは未付与）。CI（`conformance.yml`）は `GITHUB_TOKEN` で private のまま pull 可。k3s では artifact を `gh run download` → `sudo k3s ctr images import`（`deploy/conformance/k8s/suite.yaml` 参照）。
-- **Conformance 実走状況**：**in-repo Layer 1（`npm run test:conformance`）は 20/20 green で CI ゲート化済み**。外部 OpenID Conformance Suite（Layer 2, `conformance.yml`）は P3 で本有効化：discovery/PAR/authorize/token が実装済みになったので、次は suite の FAPI2 SP プラン（DPoP + private_key_jwt）を回し、browser interaction（authorize リダイレクト）を dev 自動認証で通す配線が残タスク。
+- **Conformance 実走状況**：**in-repo Layer 1（`npm run test:conformance`）は 20/20 green で CI ゲート化済み**。**外部 OpenID Conformance Suite（Layer 2, `conformance.yml`）も overall=PASS：FAPI2 SP プラン 55 モジュール中 49 PASS / 1 SKIP / 5 想定 non-pass（`EXPECTED_NONPASS`）**。P2 で AS が対話化したので `deploy/conformance/drive-browser.mjs`（Playwright headless）が dev ログイン + consent 承認/拒否をドライブし、`user-rejects-authentication` は deny クリックで実 PASS になった。残る 5 想定 non-pass はハーネス制約：(a) 非リダイレクトのエラーページは外部 browser から観測不可（unsigned-without-par / par-attempt-reuse / expired-request_uri / different-client）、(b) `par-...prior-to-auth` は「完了せず 2 回訪問」を headless で再現不可。いずれも AS 挙動は Layer 1 で担保済み（理由は `run-conformance.sh` の `EXPECTED_NONPASS` コメント参照）。
 - **firewall の egress 許可リスト**は `init-firewall.sh` が権威。ドメイン追加時は `managed-settings.json` も更新し `scripts/check-allowlist-sync.sh` を通す（CI でも検査）。解決失敗は必須ドメインのみ FATAL、他は WARN。
 - **migrate の .sql** は tsc が dist にコピーしないため `npm run migrate`（tsx）前提。本番 Job 化は P3+。0002 に P1 ドメインスキーマ（signing_keys / par_requests / grants / authorization_codes / access_tokens / refresh_tokens / jti_replay）。
 - **dev 依存（vitest/esbuild）の audit advisory** は本番イメージに含まれない（multi-stage で prune）。本番依存は脆弱性 0。
 - **`.env` ファイルはセキュリティ保護で作成不可**。環境変数は README の表 / k8s ConfigMap+Secret で与える。
 - Helm の DB パスワードは**コミットしない**：未指定なら既存 Secret 再利用 or ランダム生成。
 
-## 6. 次フェーズ（P2 以降）
+## 6. 次フェーズ（P2 完了・P2.5 以降）
 
-- **P2 認証委譲 + PDP 統合**：`src/domain/interaction.ts` の dev 自動認証を外部 IdP 連携へ差し替え、**実ユーザー認証・セッション束縛・consent UI**を実装（P1 のセキュリティレビューで「本番前必須」と指摘済み）。prompt=none/max_age/acr_values を実 auth_time に対して評価。AuthZEN PDP を実体（OPA/Topaz/Cedar）に接続（`PDP_KIND=authzen-http`）。
-- **P3 Conformance Suite 通過**：外部 suite を FAPI2 SP プランで green に（browser interaction 配線）。
+- **P2 認証委譲 + PDP 統合（完了）**：対話ログイン + consent（承認/拒否）を実装（`src/endpoints/interaction.ts` / `src/domain/{sessions,interaction}.ts` / `src/endpoints/views.ts`）。署名 cookie セッション（`__Host-` / HMAC）・セッション束縛の CSRF・クリックジャッキングヘッダ・prompt=none/max_age 分岐。**request_uri は consent 承認（認可アクション）時に消費**（RFC9126 §4）。`AuthZenHttpPdp`（fail-closed）を `PDP_KIND=authzen-http` で選択可。**Layer 2 conformance overall=PASS**（§5 参照）。
+- **P3 Conformance Suite 通過（達成）**：外部 suite FAPI2 SP プランで overall=PASS。`conformance.yml`（workflow_dispatch）で再現可能。
+- **P2.5 外部 IdP フェデレーション**：`AuthenticationProvider` インターフェイスの別アダプタとして外部 OIDC IdP 連携を実装（既定は `DevLoginProvider`）。本番はここで実 IdP に委譲。
 - **P4 性能**：100 RPS / 1vCPU / 800MB・`/token` p95 <50ms を計測。鍵/JWKS/クライアントのキャッシュ（Redis 後付け）でボトルネック解消。
 - **本番前ゲート（レビュー由来）**：private_key_jwt 秘密鍵の envelope 暗号化は実装済みだが **KEYSTORE_KEK を KMS/sealed-secret 管理**へ。`resource` パラメータ (RFC 8707) で AT の `aud` をリソース別に絞る（現状は issuer 既定）。DB 接続 TLS（`DATABASE_SSL=true`、本番ガードで強制）。
 
