@@ -1,13 +1,19 @@
 # HANDOVER — FAPI 2.0 認可サーバー PoC
 
-P0（開発環境 + アプリ骨組み）完了時点の引継ぎ。詳細設計は [docs/GOALS.md](docs/GOALS.md) / [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) / [docs/SPECS.md](docs/SPECS.md) を参照。
+P1（コアプロトコル自前実装）完了時点の引継ぎ。詳細設計は [docs/GOALS.md](docs/GOALS.md) / [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) / [docs/SPECS.md](docs/SPECS.md)、要件トレーサビリティは [docs/REQUIREMENTS-P1.md](docs/REQUIREMENTS-P1.md) を参照。
 
 ## 1. これは何か / 現状
 
 - 目的：**FAPI 2.0 Security Profile 準拠の認可サーバーをスクラッチ実装**できるかの実証実験。既存 OAuth/OIDC ライブラリは不使用（許容は jose / Fastify / pg / zod / pino のみ）。
 - 最終ゴール：**FAPI2 SP Conformance Suite を green + 1 vCPU/800MB で 100 RPS**、認証・認可・プロトコルが分離された構成。
-- 現状：**P0 完了**。Claude Code Docker サンドボックスが起動済み。アプリは `/health`・`/healthz` のみ（プロトコル本体は P1）。
-- セキュリティ：レビュー実施済みで **Critical/High/Medium = 0、残 Low のみ**。
+- 現状：**P1 完了**。プロトコル本体を実装済み：
+  - **エンドポイント**：`/.well-known/openid-configuration`・`/.well-known/oauth-authorization-server`・`/jwks`・`/par`・`/authorize`・`/token`・`/revoke`・`/introspect`（+ `/health`・`/healthz`）。
+  - **フロー**：PAR (RFC 9126) → authorize + PKCE S256 (RFC 7636) + iss (RFC 9207) → token（private_key_jwt (RFC 7523) + DPoP (RFC 9449)）→ JWT AT (RFC 9068) + ID Token (OIDC) + refresh（ローテーションなし）→ revocation (RFC 7009) / introspection (RFC 7662)。
+  - **鍵**：ES256 DB keystore（自動生成・`npm run keys:rotate`・秘密鍵は KEYSTORE_KEK で AES-256-GCM 暗号化）。
+  - **認証委譲の継ぎ目**：`src/domain/interaction.ts`（P1 は dev 自動認証、P2 で外部 IdP へ）。consent は AuthZEN PDP（`src/authz/`）。
+  - **in-repo conformance（Layer 1）が 20/20 green**。CI（`npm run test:conformance`）ゲート化済み。unit 134 / typecheck / prod-audit も green。
+- 認証は P1 では dev 自動認証（`DEV_INTERACTION_SUB`）。**本番投入前の必須事項は §6 次フェーズ参照**（実ユーザー認証・セッション束縛・consent UI）。
+- セキュリティ：各 PR で code-review + security-review ループ実施、**Critical/High/Medium = 0**（既知の PoC スコープ逸脱は docs/REQUIREMENTS-P1.md §14 と各 PR に記録）。
 
 ## 2. 構成（要点）
 
@@ -104,16 +110,19 @@ jj git push --bookmark feature/p1-par      # push → PR を作成
 - **k3s は privileged 必須**（in-sandbox / DinD なし）。コンテナを信頼境界とみなす設計（host 隔離 + egress 制限済み）。起動不可ならフォールバック（サンドボックス内 postgres プロセス + Helm 静的検証）を docs/GOALS §9 で相談。
 - **in-sandbox k3s の snapshotter**：overlayfs-on-overlayfs が不可（`failed to mount overlay: invalid argument`）でノードが登録されない。`scripts/dev-cluster.sh` は `--snapshotter=fuse-overlayfs`（イメージに同梱）で起動するよう修正済み。**注意：起動中の k3s は root 所有で、`sudo` は `k3s/nerdctl/ctr/init-firewall.sh` のみ NOPASSWD のため `pkill` 不可＝再起動できない**。誤った snapshotter で起動済みの場合はコンテナ rebuild でリセット。kubeconfig は `sudo k3s kubectl config view --raw` で取得（`sudo cat` はパスワードを要求し不可）。
 - **Conformance Suite イメージ**：`conformance-image.yml` が upstream `release-v5.1.45` を GitHub Actions でビルド→`ghcr.io/watahani/conformance-suite-{server,httpd}:pinned`（**現状 private**）へ push、かつ tarball を artifact 出力。GHCR を public 化するには packages スコープ付きトークン/UI 操作が必要（gh の現トークンは未付与）。CI（`conformance.yml`）は `GITHUB_TOKEN` で private のまま pull 可。k3s では artifact を `gh run download` → `sudo k3s ctr images import`（`deploy/conformance/k8s/suite.yaml` 参照）。
-- **Conformance 実走状況**：`conformance.yml`（runner）で end-to-end 検証済み＝suite 起動→`run-conformance.sh` が discovery ゲートで `exit 1`（P1 未実装による正当な red）。`PASS` には P1 のエンドポイント実装が必要。
+- **Conformance 実走状況**：**in-repo Layer 1（`npm run test:conformance`）は 20/20 green で CI ゲート化済み**。外部 OpenID Conformance Suite（Layer 2, `conformance.yml`）は P3 で本有効化：discovery/PAR/authorize/token が実装済みになったので、次は suite の FAPI2 SP プラン（DPoP + private_key_jwt）を回し、browser interaction（authorize リダイレクト）を dev 自動認証で通す配線が残タスク。
 - **firewall の egress 許可リスト**は `init-firewall.sh` が権威。ドメイン追加時は `managed-settings.json` も更新し `scripts/check-allowlist-sync.sh` を通す（CI でも検査）。解決失敗は必須ドメインのみ FATAL、他は WARN。
-- **migrate の .sql** は tsc が dist にコピーしないため `npm run migrate`（tsx）前提。本番 Job 化は P1。
+- **migrate の .sql** は tsc が dist にコピーしないため `npm run migrate`（tsx）前提。本番 Job 化は P3+。0002 に P1 ドメインスキーマ（signing_keys / par_requests / grants / authorization_codes / access_tokens / refresh_tokens / jti_replay）。
 - **dev 依存（vitest/esbuild）の audit advisory** は本番イメージに含まれない（multi-stage で prune）。本番依存は脆弱性 0。
 - **`.env` ファイルはセキュリティ保護で作成不可**。環境変数は README の表 / k8s ConfigMap+Secret で与える。
 - Helm の DB パスワードは**コミットしない**：未指定なら既存 Secret 再利用 or ランダム生成。
 
-## 6. 次フェーズ（P1）
+## 6. 次フェーズ（P2 以降）
 
-OAuth/OIDC/FAPI プロトコル本体の自前実装：PAR(9126) / authorize+PKCE(7636) / token / DPoP+nonce(9449) / private_key_jwt(7523) / JWT AT(9068) / Discovery(8414)+JWKS / iss(9207)。ES256(P-256) 署名鍵。仕様準拠をテストで担保。`src/endpoints` + `src/domain` + `src/crypto` に実装、`src/db` にドメインスキーマ追加。
+- **P2 認証委譲 + PDP 統合**：`src/domain/interaction.ts` の dev 自動認証を外部 IdP 連携へ差し替え、**実ユーザー認証・セッション束縛・consent UI**を実装（P1 のセキュリティレビューで「本番前必須」と指摘済み）。prompt=none/max_age/acr_values を実 auth_time に対して評価。AuthZEN PDP を実体（OPA/Topaz/Cedar）に接続（`PDP_KIND=authzen-http`）。
+- **P3 Conformance Suite 通過**：外部 suite を FAPI2 SP プランで green に（browser interaction 配線）。
+- **P4 性能**：100 RPS / 1vCPU / 800MB・`/token` p95 <50ms を計測。鍵/JWKS/クライアントのキャッシュ（Redis 後付け）でボトルネック解消。
+- **本番前ゲート（レビュー由来）**：private_key_jwt 秘密鍵の envelope 暗号化は実装済みだが **KEYSTORE_KEK を KMS/sealed-secret 管理**へ。`resource` パラメータ (RFC 8707) で AT の `aud` をリソース別に絞る（現状は issuer 既定）。DB 接続 TLS（`DATABASE_SSL=true`、本番ガードで強制）。
 
 ## 7. クイックリファレンス
 
@@ -121,6 +130,9 @@ OAuth/OIDC/FAPI プロトコル本体の自前実装：PAR(9126) / authorize+PKC
 |---|---|
 | 型チェック | `npm run typecheck` |
 | テスト | `npm test` |
+| conformance (Layer 1) | `npm run test:conformance` |
+| 鍵ローテーション | `npm run keys:rotate` |
+| クライアント投入 | `npm run seed:clients -- clients.json` |
 | ローカル起動 | `npm run dev` |
 | k3s 起動/停止 | `bash scripts/dev-cluster.sh up` / `down` |
 | Helm デプロイ | `helm install as deploy/helm/auth-server -n as --create-namespace` |

@@ -13,6 +13,8 @@
     "start": "node --max-old-space-size=256 dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "migrate": "tsx src/db/migrate.ts",
+    "keys:rotate": "tsx src/db/keys-rotate.ts",
+    "seed:clients": "tsx src/db/seed-clients.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:conformance": "vitest run --config vitest.conformance.config.ts"

@@ -53,13 +53,13 @@
 
 - すべての push / PR で **`.github/workflows/ci.yml`**：typecheck / test / 本番依存 audit ゲート / SBOM / helm lint・template / allowlist 同期 / アプリイメージ build smoke。
 - **FAPI conformance は 2 レイヤ**（ハーネス `deploy/conformance/`、ワークフロー `conformance.yml`、いずれも `workflow_dispatch` で gated）：
-  - **Layer 1（in-repo・常時実行可・Docker 不要）**：`npm run test:conformance`（`vitest.conformance.config.ts` / `test/conformance/`）。AS を `buildApp()` で起動し HTTP で叩いて FAPI2 SP 要件を直接アサート。仕様要件を実行可能テストに落とした高速層で、**P1 エンドポイント未実装の間は red**（TDD ベースライン）。default の `npm test` からは除外（緑ゲートを赤にしない）。
+  - **Layer 1（in-repo・常時実行可・Docker 不要）**：`npm run test:conformance`（`vitest.conformance.config.ts` / `test/conformance/`）。AS を `buildApp()` で in-memory storage（`STORAGE=memory`）起動し HTTP で叩いて FAPI2 SP 要件を直接アサート。**P1 完了で 20/20 green となり `ci.yml` のゲートに昇格済み**（PAR→authorize→token を DPoP + private_key_jwt で end-to-end）。要件 ID は `docs/REQUIREMENTS-P1.md`。default の `npm test`（unit）とは別ステップ。
   - **Layer 2（external・P3 で本有効化）**：**AS をサービス起動 → OpenID Conformance Suite を外部から当てる**（参考は [eudiplo](https://github.com/openwallet-foundation/eudiplo) の e2e/conformance CI 構成のみ）。FAPI 2.0 SP + DPoP + private_key_jwt のプランを回す。
     - **Suite は毎回ビルドしない**：`conformance-image.yml`（たまに実行）が upstream `release-v5.1.45` をビルドし `ghcr.io/<owner>/conformance-suite-{server,httpd}:pinned`（**現状 private**）へ push＋tarball artifact 出力 → **pull/import だけ**。public 化は packages スコープ付きトークン/UI 操作が必要。
     - 実行：**CI = `conformance.yml`（runner で compose pull&up、`GITHUB_TOKEN` で private pull・end-to-end 検証済み）**、**サンドボックス = `deploy/conformance/run-local.sh`（k3s に apply、artifact を `ctr import`）**。
     - **in-sandbox k3s は `--snapshotter=fuse-overlayfs` 必須**（overlayfs 不可、`dev-cluster.sh` 修正済み）。起動中 k3s は再起動不可（sudo 制約）なので誤起動時はコンテナ rebuild。
-    - 現状 runner で suite 起動→discovery ゲートで red を確認。`PASS` は P1 エンドポイント実装後。
-- **CI が赤なら緑になるまで修正を反復**（CI ループ）。conformance green を P0 一行ゴールの達成条件とする。
+    - P1 完了でエンドポイントが揃ったため、次は suite の FAPI2 SP プランを回し browser interaction（authorize リダイレクト）を dev 自動認証で通す配線が残タスク（P3）。
+- **CI が赤なら緑になるまで修正を反復**（CI ループ）。Layer 1 conformance green は達成済み（一行ゴールの Docker 不要層）。最終的な一行ゴール達成条件は Layer 2（外部 suite）green（P3）。
 
 ## このファイルの保守
 
