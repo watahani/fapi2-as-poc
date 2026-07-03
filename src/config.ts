@@ -63,6 +63,15 @@ const schema = z.object({
   // envelope-encrypted at rest when set. Required in production so a leaked
   // DB dump alone cannot forge tokens.
   KEYSTORE_KEK: z.string().default(""),
+
+  // NFR-6 / RFC 9126 §2.3: per-source fixed-window limit on the PAR/token
+  // endpoints (0 disables; production-grade limiting is P4).
+  RATE_LIMIT_PER_MIN: z.coerce.number().int().min(0).default(300),
+
+  // Fastify trustProxy: behind a TLS-terminating ingress this must name the
+  // trusted hop(s) so req.ip is the real client (else all traffic shares one
+  // rate-limit bucket). Accepts "true"/"false"/hop-count/CIDR list.
+  TRUST_PROXY: z.string().default("false"),
 });
 
 export type AppConfig = Readonly<{
@@ -87,6 +96,9 @@ export type AppConfig = Readonly<{
   dpopNonceRequired: boolean;
   dpopNonceSecret: string;
   accessTokenAudience: string;
+  rateLimitPerMin: number;
+  /** Fastify trustProxy value: false, true, a hop count, or a CIDR list. */
+  trustProxy: boolean | number | string;
   /** Decoded key-encryption key (32 bytes) or undefined when not configured. */
   keystoreKek: Buffer | undefined;
   /** Dev-grade settings in effect (empty in production — the guard threw). */
@@ -168,9 +180,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     dpopNonceRequired: parsed.DPOP_NONCE_REQUIRED === "true",
     dpopNonceSecret: parsed.DPOP_NONCE_SECRET,
     accessTokenAudience: parsed.ACCESS_TOKEN_AUDIENCE || issuer,
+    rateLimitPerMin: parsed.RATE_LIMIT_PER_MIN,
+    trustProxy: parseTrustProxy(parsed.TRUST_PROXY),
     keystoreKek,
     devModeWarnings: devGrade,
   };
+}
+
+/** "true"/"false" → boolean, a bare integer → hop count, otherwise a
+ * comma-separated CIDR/IP list passed through to Fastify verbatim. */
+function parseTrustProxy(v: string): boolean | number | string {
+  if (v === "true") return true;
+  if (v === "" || v === "false") return false;
+  if (/^\d+$/.test(v)) return Number(v);
+  return v;
 }
 
 /** Best-effort dev-credential detection (defence in depth, not a substitute

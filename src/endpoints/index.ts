@@ -5,12 +5,18 @@ import type { Storage } from "../db/repositories/types.js";
 import type { KeyStore } from "../crypto/keys.js";
 import { OAuthError } from "../domain/errors.js";
 import { registerDiscovery } from "./discovery.js";
+import { registerFormBodyParser } from "./form.js";
+import { registerPar } from "./par.js";
+import { FixedWindowRateLimiter } from "./rate-limit.js";
 
 export interface EndpointDeps {
   config: AppConfig;
   pdp: PolicyDecisionPoint;
   storage: Storage;
   keystore: KeyStore;
+  /** Shared across the credential-bearing endpoints so RATE_LIMIT_PER_MIN is
+   * one per-source budget, not one per endpoint. */
+  rateLimiter: FixedWindowRateLimiter;
 }
 
 /**
@@ -25,7 +31,13 @@ export interface EndpointDeps {
  *   POST /revoke                              RFC 7009           (P1-e)
  *   POST /introspect                          RFC 7662           (P1-e)
  */
-export function registerEndpoints(app: FastifyInstance, deps: EndpointDeps): void {
+export type EndpointDepsInput = Omit<EndpointDeps, "rateLimiter">;
+
+export function registerEndpoints(app: FastifyInstance, input: EndpointDepsInput): void {
+  const deps: EndpointDeps = {
+    ...input,
+    rateLimiter: new FixedWindowRateLimiter(input.config.rateLimitPerMin),
+  };
   // Central OAuth error mapping (RFC 6749 §5.2): endpoints throw OAuthError;
   // this handler renders status/headers/JSON body consistently, including
   // WWW-Authenticate (invalid_client) and DPoP-Nonce (use_dpop_nonce).
@@ -62,5 +74,7 @@ export function registerEndpoints(app: FastifyInstance, deps: EndpointDeps): voi
       .send({ error: "server_error" });
   });
 
+  registerFormBodyParser(app);
   registerDiscovery(app, deps);
+  registerPar(app, deps);
 }

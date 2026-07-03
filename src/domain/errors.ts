@@ -9,7 +9,9 @@
  * trusted, in which case redirecting is forbidden (REQUIREMENTS-P1 OIDC-10).
  */
 
-/** RFC 6749 §5.2 + RFC 9449 §12.2 + RFC 7009 §2.2.1 error codes. */
+/** RFC 6749 §5.2 + RFC 9449 §12.2 + RFC 7009 §2.2.1 error codes.
+ * unsupported_response_type appears because the PAR endpoint returns
+ * authorization-endpoint error codes in the §5.2 format (RFC 9126 §2.3). */
 export type TokenErrorCode =
   | "invalid_request"
   | "invalid_client"
@@ -17,6 +19,7 @@ export type TokenErrorCode =
   | "unauthorized_client"
   | "unsupported_grant_type"
   | "invalid_scope"
+  | "unsupported_response_type"
   | "invalid_dpop_proof"
   | "use_dpop_nonce"
   | "unsupported_token_type"

@@ -21,13 +21,28 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance, InjectOptions } from "fastify";
 import { buildApp } from "../../src/index.js";
 import { closePool } from "../../src/db/pool.js";
+import { createMemoryStorage } from "../../src/db/repositories/memory.js";
+import {
+  ASSERTION_TYPE,
+  createTestClient,
+  form,
+  makeClientAssertion,
+  seedClient,
+  type TestClient,
+} from "../helpers/client.js";
 
 const ISSUER = "https://localhost:3000";
 
 let app: FastifyInstance;
+let client: TestClient;
 
 beforeAll(async () => {
-  app = buildApp();
+  // Storage is injected so a conformance client can be registered; the AS
+  // itself is still the real buildApp() served over HTTP.
+  const storage = createMemoryStorage();
+  client = await createTestClient({ clientId: "conformance-test-client" });
+  await seedClient(storage, client);
+  app = buildApp({ storage });
   await app.ready();
 });
 
@@ -35,6 +50,14 @@ afterAll(async () => {
   await app.close();
   await closePool();
 });
+
+/** Fresh private_key_jwt client authentication params (OIDC Core §9). */
+async function clientAuth(): Promise<Record<string, string>> {
+  return {
+    client_assertion_type: ASSERTION_TYPE,
+    client_assertion: await makeClientAssertion(client, ISSUER),
+  };
+}
 
 function inject(opts: InjectOptions) {
   return app.inject(opts);
@@ -156,14 +179,40 @@ describe("PAR endpoint [RFC 9126, FAPI2 §5.3.2.2]", () => {
   });
 
   it("rejects a request_uri parameter pushed to the PAR endpoint [RFC9126 §2.1]", async () => {
+    // Client authentication comes first in the §2.1 processing order, so the
+    // request_uri rejection is asserted on an authenticated request.
     const res = await inject({
       method: "POST",
       url: "/par",
       headers: { "content-type": "application/x-www-form-urlencoded" },
-      payload: "request_uri=urn:ietf:params:oauth:request_uri:abc",
+      payload: form({
+        ...(await clientAuth()),
+        request_uri: "urn:ietf:params:oauth:request_uri:abc",
+      }),
     });
     expect(res.statusCode).toBeGreaterThanOrEqual(400);
     expect((res.json() as { error?: string }).error).toBe("invalid_request");
+  });
+
+  it("accepts a valid client-authenticated push [RFC9126 §2.2; FAPI2 5.3.2.2(2)]", async () => {
+    const res = await inject({
+      method: "POST",
+      url: "/par",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: form({
+        ...(await clientAuth()),
+        response_type: "code",
+        client_id: client.clientId,
+        redirect_uri: client.redirectUri,
+        scope: "openid",
+        code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+        code_challenge_method: "S256",
+      }),
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json() as { request_uri: string; expires_in: number };
+    expect(body.request_uri).toMatch(/^urn:ietf:params:oauth:request_uri:/);
+    expect(body.expires_in).toBeLessThan(600); // FAPI2 5.3.2.2(12)
   });
 
   it("rejects non-POST methods on the PAR endpoint [RFC9126 §2.3]", async () => {
