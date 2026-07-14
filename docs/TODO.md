@@ -39,8 +39,11 @@
 - [ ] **k8s マイグレーション Job**：`npm run migrate`（tsx）を initContainer / Job 化（HANDOVER 既知事項）
 - [ ] **GHCR conformance イメージの public 化**（packages スコープトークン/UI 操作が必要）
 
-## P2.5（外部 IdP フェデレーション）で発生予定の NFR
+## 認証コンポーネント接続（社内の別認証基盤との統合）
 
-- [ ] **上流 IdP 障害時の挙動**：discovery/JWKS/token 取得失敗は fail-closed（ログイン不可）+ 監査ログ。タイムアウトとリトライ方針
-- [ ] **上流 IdP の鍵ローテーション追従**：JWKS キャッシュの TTL / kid ミスヒット時の再取得（`src/crypto/jws.ts` の remoteJwksCache を流用）
-- [ ] **acr/amr/auth_time のマッピング方針**：上流 ID トークンのクレームを自 AS のセッション・ID トークンへどう透過するか
+本 AS はユーザー認証を自前実装せず、`AuthenticationProvider` インターフェイス経由で
+**社内の別の認証コンポーネント**へ委譲する（外部 IdP フェデレーションは対象外）。組込み
+dev ログインは local/CI 用途。実接続アダプタを実装する際に検討する項目：
+
+- [ ] **認証コンポーネント障害時の挙動**：到達不能・応答不正は fail-closed（ログイン不可）+ 監査ログ。タイムアウト・リトライ方針
+- [ ] **acr/amr/auth_time のマッピング方針**：認証コンポーネントが返す認証結果を自 AS のセッション・ID トークンのクレームへどう透過するか

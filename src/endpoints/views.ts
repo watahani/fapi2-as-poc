@@ -1,8 +1,9 @@
 /**
  * Minimal server-rendered HTML for the interactive login and consent pages.
  * No template engine (no new dependency); every interpolated value is HTML-
- * escaped. These pages are dev-facing (production delegates authentication to
- * an external IdP, P2.5), but consent + deny are real FAPI2 flow steps.
+ * escaped. The login page is dev-facing (in deployment authentication is
+ * delegated to a separate in-house authentication component), but consent +
+ * deny are real FAPI2 flow steps.
  */
 
 /** Escape for HTML text/attribute contexts. */

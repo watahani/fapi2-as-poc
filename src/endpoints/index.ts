@@ -22,7 +22,7 @@ export interface EndpointDeps {
   pdp: PolicyDecisionPoint;
   storage: Storage;
   keystore: KeyStore;
-  /** End-user authentication (dev login now; external IdP later). */
+  /** End-user authentication (dev login now; in-house auth component later). */
   authProvider: AuthenticationProvider;
   /** Shared across the credential-bearing endpoints so RATE_LIMIT_PER_MIN is
    * one per-source budget, not one per endpoint. */

@@ -10,7 +10,7 @@ Fastify (HTTP 層・ルーティングのみ)              src/index.ts (buildAp
              ├─ src/crypto/  jose ラッパ（JWS 署名/検証, JWK 管理, JWT 構築）
              ├─ src/authz/   AuthZEN PDP 境界（PEP→PDP, 差し替え可能 / mock）
              └─ src/db/      リポジトリ（生 SQL + pg）, 自前マイグレーションランナー
-   └─ 認証委譲境界          外部 IdP interaction（P2）
+   └─ 認証委譲境界          認証コンポーネント interaction（P2）
 PostgreSQL（一次ストア） / Redis（後付けキャッシュ, P4）
 ```
 
@@ -19,7 +19,7 @@ PostgreSQL（一次ストア） / Redis（後付けキャッシュ, P4）
 ## 3つの分離
 
 ### 1. プロトコル ⇔ 認証
-`/authorize` 処理中に認証が必要になったら認証コンポーネント（外部 IdP / interaction）へ委譲。AS は認証結果（account id, acr, amr）のみ受領しトークン発行に専念。境界: 認証委譲（P2）。
+`/authorize` 処理中に認証が必要になったら認証コンポーネント（対話 interaction。deployment では `AuthenticationProvider` アダプタ経由で社内の別認証基盤）へ委譲。AS は認証結果（account id, acr, amr）のみ受領しトークン発行に専念。境界: 認証委譲（P2）。外部 IdP フェデレーションは対象外。
 
 ### 2. プロトコル ⇔ 認可判断
 consent 可否・スコープ/claim 付与・リソースアクセス可否を **AuthZEN Authorization API (PDP)** に問い合わせる。AS は PEP。境界: `src/authz/pdp.ts`（`PolicyDecisionPoint`）。

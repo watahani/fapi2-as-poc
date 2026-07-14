@@ -25,10 +25,10 @@ const schema = z.object({
   DATABASE_SSL: z.string().default("false"),
   // Optional cache layer (added only when needed; empty = disabled).
   REDIS_URL: z.string().default(""),
-  // Authentication delegation (phase 2). Empty = built-in dev interaction.
-  EXTERNAL_IDP_URL: z.string().default(""),
-  // Subject auto-authenticated by the built-in dev interaction (P1; replaced
-  // by external IdP delegation in P2).
+  // Subject auto-authenticated by the built-in dev interaction. In deployment
+  // authentication is delegated to a separate authentication component via a
+  // dedicated AuthenticationProvider adapter (that adapter defines its own
+  // config); the built-in dev login is for local/CI use only.
   DEV_INTERACTION_SUB: z.string().default("dev-user"),
   // P2 interactive dev login: comma-separated usernames the dev login form
   // accepts. Empty = allow only DEV_INTERACTION_SUB.
@@ -102,7 +102,6 @@ export type AppConfig = Readonly<{
   storage: "memory" | "postgres";
   pdp: Readonly<{ kind: "mock" | "authzen-http"; authzenUrl: string; authzenToken: string }>;
   redisUrl: string;
-  externalIdpUrl: string;
   devInteractionSub: string;
   devLoginUsers: readonly string[];
   sessionSecret: string;
@@ -210,7 +209,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       authzenToken: parsed.PDP_AUTHZEN_TOKEN,
     },
     redisUrl: parsed.REDIS_URL,
-    externalIdpUrl: parsed.EXTERNAL_IDP_URL,
     devInteractionSub: parsed.DEV_INTERACTION_SUB,
     devLoginUsers: parsed.DEV_LOGIN_USERS
       ? parsed.DEV_LOGIN_USERS.split(",").map((u) => u.trim()).filter(Boolean)

@@ -33,7 +33,7 @@
 | 指標 | 目標 |
 |---|---|
 | 定常スループット | **100 RPS を持続**（PAR→authorize→token 混在） |
-| `/token` 自処理レイテンシ p95 | **< 50ms**（外部 IdP/PDP 往復除く） |
+| `/token` 自処理レイテンシ p95 | **< 50ms**（認証コンポーネント/PDP 往復除く） |
 | エラー率 | < 0.1% |
 | CPU 使用率 | 100 RPS 時に 1 vCPU の 80% 以下 |
 | 常駐メモリ RSS | **< 300MB**（負荷ピークでも 500MB 未満、`--max-old-space-size=256`） |
@@ -49,7 +49,7 @@
 
 ## 5. アーキテクチャ要件（3つの分離）
 
-1. **プロトコル ⇔ 認証**：ユーザー認証は外部 IdP / interaction 境界へ委譲。
+1. **プロトコル ⇔ 認証**：ユーザー認証は認証コンポーネント（対話 interaction。deployment は社内の別認証基盤）へ委譲。外部 IdP フェデレーションは対象外。
 2. **プロトコル ⇔ 認可判断**：consent・スコープ可否を **AuthZEN PDP** に委譲（AS は PEP）。
 3. **PDP 実装の差し替え可能性**：`src/authz/pdp.ts` のインターフェイス背後に OPA/Topaz/Cedar/mock を隠蔽。
 
@@ -75,7 +75,7 @@
 |---|---|---|
 | **P0** | 開発環境（サンドボックス + k8s）+ アプリ骨組み | サンドボックス隔離確認・`helm install` で AS+postgres 起動・`/healthz` green |
 | **P1** | コアプロトコル自前実装（PAR/authorize/token/DPoP/private_key_jwt/JWT/Discovery/JWKS/iss） | DPoP 付き authz code フロー成立、仕様準拠をテストで担保 |
-| **P2** | 認証委譲（外部 IdP）＋ AuthZEN PDP 統合 | 認証・認可が分離して動作 |
+| **P2** | 認証委譲（認証コンポーネント）＋ AuthZEN PDP 統合 | 認証・認可が分離して動作 |
 | **P3** | Conformance Suite 通過 | FAPI2 SP テストプラン green |
 | **P4** | 性能チューニング・負荷試験（必要に応じ Redis） | §3 達成・レポート |
 | **P5（任意）** | mTLS / Message Signing / OTel | — |
@@ -84,5 +84,5 @@
 
 - in-sandbox k8s の privileged 容認（リスク）／ rootless 方式の採否
 - 署名鍵のローテーション・保管（KMS の要否）、k8s Secret 運用
-- 外部 IdP / AuthZEN PDP の実体（P2）
+- 認証コンポーネント（社内の別認証基盤）/ AuthZEN PDP の実体（P2）
 - マイグレーション運用（自前ランナーで十分か）

@@ -58,7 +58,7 @@
     - **Suite は毎回ビルドしない**：`conformance-image.yml`（たまに実行）が upstream `release-v5.1.45` をビルドし `ghcr.io/<owner>/conformance-suite-{server,httpd}:pinned`（**現状 private**）へ push＋tarball artifact 出力 → **pull/import だけ**。public 化は packages スコープ付きトークン/UI 操作が必要。
     - 実行：**CI = `conformance.yml`（runner で compose pull&up、`GITHUB_TOKEN` で private pull・end-to-end 検証済み）**、**サンドボックス = `deploy/conformance/run-local.sh`（k3s に apply、artifact を `ctr import`）**。
     - **in-sandbox k3s は `--snapshotter=fuse-overlayfs` 必須**（overlayfs 不可、`dev-cluster.sh` 修正済み）。起動中 k3s は再起動不可（sudo 制約）なので誤起動時はコンテナ rebuild。
-    - P2 で対話ログイン + consent を実装し、`drive-browser.mjs` が browser interaction をドライブして Layer 2 overall=PASS を達成。次の拡張は外部 IdP フェデレーション（`AuthenticationProvider` の別アダプタ、P2.5）。
+    - P2 で対話ログイン + consent を実装し、`drive-browser.mjs` が browser interaction をドライブして Layer 2 overall=PASS を達成。認証は `AuthenticationProvider` インターフェイス背後（既定 `DevLoginProvider`）で、deployment では**社内の別の認証コンポーネント**へ委譲する別アダプタを実装する想定（外部 IdP フェデレーションは対象外）。
 - **CI が赤なら緑になるまで修正を反復**（CI ループ）。Layer 1 conformance green（Docker 不要層）に加え、**Layer 2（外部 suite）も overall=PASS を達成**（一行ゴール達成）。
 
 ## このファイルの保守

@@ -10,7 +10,7 @@ P1（コアプロトコル自前実装）完了時点の引継ぎ。詳細設計
   - **エンドポイント**：`/.well-known/openid-configuration`・`/.well-known/oauth-authorization-server`・`/jwks`・`/par`・`/authorize`・`/token`・`/revoke`・`/introspect`（+ `/health`・`/healthz`）。
   - **フロー**：PAR (RFC 9126) → authorize + PKCE S256 (RFC 7636) + iss (RFC 9207) → token（private_key_jwt (RFC 7523) + DPoP (RFC 9449)）→ JWT AT (RFC 9068) + ID Token (OIDC) + refresh（ローテーションなし）→ revocation (RFC 7009) / introspection (RFC 7662)。
   - **鍵**：ES256 DB keystore（自動生成・`npm run keys:rotate`・秘密鍵は KEYSTORE_KEK で AES-256-GCM 暗号化）。
-  - **認証委譲の継ぎ目**：`src/domain/interaction.ts`（P1 は dev 自動認証、P2 で外部 IdP へ）。consent は AuthZEN PDP（`src/authz/`）。
+  - **認証委譲の継ぎ目**：`src/domain/interaction.ts`（P1 は dev 自動認証、P2 で対話ログイン。deployment は `AuthenticationProvider` の別アダプタで社内の別認証コンポーネントへ委譲）。consent は AuthZEN PDP（`src/authz/`）。
   - **in-repo conformance（Layer 1）が 20/20 green**。CI（`npm run test:conformance`）ゲート化済み。unit 134 / typecheck / prod-audit も green。
 - 認証は P1 では dev 自動認証（`DEV_INTERACTION_SUB`）。**本番投入前の必須事項は §6 次フェーズ参照**（実ユーザー認証・セッション束縛・consent UI）。
 - セキュリティ：各 PR で code-review + security-review ループ実施、**Critical/High/Medium = 0**（既知の PoC スコープ逸脱は docs/REQUIREMENTS-P1.md §14 と各 PR に記録）。
@@ -117,11 +117,11 @@ jj git push --bookmark feature/p1-par      # push → PR を作成
 - **`.env` ファイルはセキュリティ保護で作成不可**。環境変数は README の表 / k8s ConfigMap+Secret で与える。
 - Helm の DB パスワードは**コミットしない**：未指定なら既存 Secret 再利用 or ランダム生成。
 
-## 6. 次フェーズ（P2 完了・P2.5 以降）
+## 6. 次フェーズ（P2 完了・以降）
 
 - **P2 認証委譲 + PDP 統合（完了）**：対話ログイン + consent（承認/拒否）を実装（`src/endpoints/interaction.ts` / `src/domain/{sessions,interaction}.ts` / `src/endpoints/views.ts`）。署名 cookie セッション（`__Host-` / HMAC）・セッション束縛の CSRF・クリックジャッキングヘッダ・prompt=none/max_age 分岐。**request_uri は consent 承認（認可アクション）時に消費**（RFC9126 §4）。`AuthZenHttpPdp`（fail-closed）を `PDP_KIND=authzen-http` で選択可。**Layer 2 conformance overall=PASS**（§5 参照）。
 - **P3 Conformance Suite 通過（達成）**：外部 suite FAPI2 SP プランで overall=PASS。`conformance.yml`（workflow_dispatch）で再現可能。
-- **P2.5 外部 IdP フェデレーション**：`AuthenticationProvider` インターフェイスの別アダプタとして外部 OIDC IdP 連携を実装（既定は `DevLoginProvider`）。本番はここで実 IdP に委譲。
+- **認証コンポーネント接続**：`AuthenticationProvider` インターフェイスの別アダプタとして**社内の別の認証コンポーネント**へ接続（既定は `DevLoginProvider`、deployment はここで実認証基盤に委譲）。外部 IdP フェデレーションは対象外。
 - **P4 性能**：100 RPS / 1vCPU / 800MB・`/token` p95 <50ms を計測。鍵/JWKS/クライアントのキャッシュ（Redis 後付け）でボトルネック解消。
 - **本番前ゲート（レビュー由来）**：private_key_jwt 秘密鍵の envelope 暗号化は実装済みだが **KEYSTORE_KEK を KMS/sealed-secret 管理**へ。`resource` パラメータ (RFC 8707) で AT の `aud` をリソース別に絞る（現状は issuer 既定）。DB 接続 TLS（`DATABASE_SSL=true`、本番ガードで強制）。
 
