@@ -4,9 +4,10 @@
  *
  * P2 makes the authorization endpoint INTERACTIVE: the user logs in (via an
  * AuthenticationProvider) and consents before a code is issued. The default
- * provider is a dev local login; an external OIDC IdP is a drop-in adapter
- * behind the same interface (P2.5). The consent/authorization decision is
- * still delegated to the PDP (AuthZEN) so the AS stays a PEP.
+ * provider is a dev local login; in deployment a separate (in-house)
+ * authentication component plugs in as another adapter behind the same
+ * interface. The consent/authorization decision is still delegated to the PDP
+ * (AuthZEN) so the AS stays a PEP.
  */
 import type { AppConfig } from "../config.js";
 import type { PolicyDecisionPoint } from "../authz/pdp.js";
@@ -23,8 +24,8 @@ export interface AuthenticatedUser {
 
 /**
  * Authenticates an end-user from submitted credentials. Implementations are
- * swappable (dev local login now; external IdP later). Returns null when the
- * credentials are not accepted.
+ * swappable (dev local login now; a separate in-house authentication component
+ * adapter in deployment). Returns null when the credentials are not accepted.
  */
 export interface AuthenticationProvider {
   authenticate(credentials: { username?: string }): Promise<AuthenticatedUser | null>;
@@ -32,8 +33,8 @@ export interface AuthenticationProvider {
 
 /**
  * Dev login: accepts a username from the configured allowlist (DEV_LOGIN_USERS,
- * defaulting to DEV_INTERACTION_SUB). No password — dev only; production
- * delegates to an external IdP (P2.5).
+ * defaulting to DEV_INTERACTION_SUB). No password — dev only; deployment
+ * delegates to a separate in-house authentication component (its own adapter).
  */
 export class DevLoginProvider implements AuthenticationProvider {
   private readonly allowed: Set<string>;
