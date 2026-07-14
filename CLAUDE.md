@@ -18,6 +18,7 @@
 - ローカル k8s は in-sandbox k3s（単体・DinD なし・privileged）。イメージは nerdctl ビルド → `ctr import`。
 - インストール済みスキル：`backend-patterns` / `coding-standards` / `tdd-workflow` / `security-review`（`.claude/skills/`）。
 - **コンテナ内作業の実務ガイド（落とし穴・手順の集約）：[docs/AGENT_GUIDE.md](docs/AGENT_GUIDE.md)** を必ず参照。
+- **分散・並行開発の進め方：[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**。作業はモジュール境界に沿って独立スライス化し、**1 セッション = 1 jj workspace = 1 bookmark**で並行。コンテキストは会話ではなく **GitHub Issue**（自己完結ブリーフ、`.github/ISSUE_TEMPLATE/slice.md`）に置く。hot files（`config.ts`/`endpoints/index.ts`/`db/repositories/*`/`CLAUDE.md`/`README.md`）は小さく先にマージ。
 - **認証の永続化**：`~/.claude`（Claude）と `~/.config/gh`（gh）は名前付きボリュームで rebuild 越しに保持（Dockerfile で node 所有を担保）。
 
 ### GitHub 認証（基本 PAT 不要）
