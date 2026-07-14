@@ -67,6 +67,10 @@ npm run migrate
 | `DEV_LOGIN_USERS` | （空） | 組込み dev ログインで受理する username（カンマ区切り）。deployment では社内の別認証コンポーネントへ委譲 |
 | `INTERACTION_TTL_SEC` | `600` | 保留インタラクション（login/consent 進行中）の TTL 秒（最大 3600） |
 | `SESSION_TTL_SEC` | `3600` | ログインセッション cookie の TTL 秒 |
+| `METADATA_SCOPES_SUPPORTED` | `openid,profile` | discovery の `scopes_supported`（カンマ区切り・`openid` 必須） |
+| `METADATA_CLAIMS_SUPPORTED` | `sub,iss,aud,exp,iat,auth_time,nonce` | discovery の `claims_supported` |
+| `METADATA_CLIENT_AUTH_SIGNING_ALGS` | `ES256,PS256,EdDSA` | クライアント認証で受理する JWS alg（FAPI2 許容の ES256/PS256/EdDSA のみ） |
+| `METADATA_DPOP_SIGNING_ALGS` | `ES256,PS256,EdDSA` | DPoP 証明で受理する JWS alg（同上） |
 
 ## ディレクトリ構成
 

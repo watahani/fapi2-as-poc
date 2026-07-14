@@ -7,6 +7,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
+import { FAPI2_JWS_ALGS } from "./crypto/jws.js";
 
 const schema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
@@ -91,6 +92,20 @@ const schema = z.object({
   // harness the AS serves https directly. Both must be set to enable.
   TLS_CERT_FILE: z.string().default(""),
   TLS_KEY_FILE: z.string().default(""),
+
+  // --- Advertised metadata sets (RFC 8414 / OIDC Discovery §3) ---
+  // Comma-separated. Defaults preserve the FAPI2 SP profile; operators may
+  // widen within FAPI2 bounds (validated below). Sets whose backing feature is
+  // not yet selectable (subject types, client-auth methods, id_token signing)
+  // stay fixed in loadConfig until the feature lands (issues #24/#27).
+  METADATA_SCOPES_SUPPORTED: z.string().default("openid,profile"),
+  METADATA_CLAIMS_SUPPORTED: z.string().default("sub,iss,aud,exp,iat,auth_time,nonce"),
+  // JWS algs the AS accepts (and advertises) on client assertions / DPoP
+  // proofs. Both advertised AND enforced: narrowing these rejects proofs and
+  // assertions signed with excluded algs (client-auth.ts / dpop.ts). Must be a
+  // subset of the FAPI2-permitted ceiling (ES256/PS256/EdDSA) [FAPI2 5.4.1].
+  METADATA_CLIENT_AUTH_SIGNING_ALGS: z.string().default("ES256,PS256,EdDSA"),
+  METADATA_DPOP_SIGNING_ALGS: z.string().default("ES256,PS256,EdDSA"),
 });
 
 export type AppConfig = Readonly<{
@@ -125,6 +140,18 @@ export type AppConfig = Readonly<{
   tls: Readonly<{ certFile: string; keyFile: string }> | undefined;
   /** Decoded key-encryption key (32 bytes) or undefined when not configured. */
   keystoreKek: Buffer | undefined;
+  /** Advertised discovery metadata sets (single source for discovery.ts).
+   * Defaults preserve the FAPI2 SP profile; sets widen as features land. */
+  metadata: Readonly<{
+    scopesSupported: readonly string[];
+    claimsSupported: readonly string[];
+    subjectTypesSupported: readonly string[];
+    idTokenSigningAlgs: readonly string[];
+    clientAuthMethods: readonly string[];
+    clientAuthSigningAlgs: readonly string[];
+    dpopSigningAlgs: readonly string[];
+    codeChallengeMethods: readonly string[];
+  }>;
   /** Dev-grade settings in effect (empty in production — the guard threw). */
   devModeWarnings: readonly string[];
 }>;
@@ -196,6 +223,36 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   const issuer = parsed.ISSUER;
 
+  // Advertised metadata sets. Keep discovery config-driven so future slices
+  // only widen config, and validate operator overrides stay within FAPI2.
+  // Metadata sets are RFC 8414 JSON arrays that model sets: trim, drop empties,
+  // de-duplicate (order-preserving).
+  const splitList = (s: string): string[] => [
+    ...new Set(s.split(",").map((x) => x.trim()).filter(Boolean)),
+  ];
+  const scopesSupported = splitList(parsed.METADATA_SCOPES_SUPPORTED);
+  if (!scopesSupported.includes("openid")) {
+    throw new Error("METADATA_SCOPES_SUPPORTED must include 'openid' [OIDC Core §3.1.2.1]");
+  }
+  const claimsSupported = splitList(parsed.METADATA_CLAIMS_SUPPORTED);
+  if (claimsSupported.length === 0) {
+    throw new Error("METADATA_CLAIMS_SUPPORTED must list at least one claim");
+  }
+  const permittedAlgs = FAPI2_JWS_ALGS as readonly string[];
+  const clientAuthSigningAlgs = splitList(parsed.METADATA_CLIENT_AUTH_SIGNING_ALGS);
+  const dpopSigningAlgs = splitList(parsed.METADATA_DPOP_SIGNING_ALGS);
+  for (const [name, algs] of [
+    ["METADATA_CLIENT_AUTH_SIGNING_ALGS", clientAuthSigningAlgs],
+    ["METADATA_DPOP_SIGNING_ALGS", dpopSigningAlgs],
+  ] as const) {
+    if (algs.length === 0) throw new Error(`${name} must list at least one algorithm`);
+    for (const a of algs) {
+      if (!permittedAlgs.includes(a)) {
+        throw new Error(`${name}: '${a}' is not a FAPI2-permitted JWS alg (${permittedAlgs.join("/")}) [FAPI2 5.4.1]`);
+      }
+    }
+  }
+
   return {
     port: parsed.PORT,
     issuer,
@@ -235,6 +292,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         ? { certFile: parsed.TLS_CERT_FILE, keyFile: parsed.TLS_KEY_FILE }
         : undefined,
     keystoreKek,
+    metadata: {
+      scopesSupported,
+      claimsSupported,
+      // Fixed to implemented features for now; widened by issues #24/#27.
+      subjectTypesSupported: ["public"], // OIDC-15
+      idTokenSigningAlgs: ["ES256"], // DISC-8 (server signs ES256 until #24)
+      clientAuthMethods: ["private_key_jwt"], // FAPI2-GEN-6 (mTLS via #27)
+      clientAuthSigningAlgs,
+      dpopSigningAlgs,
+      codeChallengeMethods: ["S256"], // PKCE-9 / FAPI2-AUTHZ-5
+    },
     devModeWarnings: devGrade,
   };
 }

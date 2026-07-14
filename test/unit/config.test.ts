@@ -22,6 +22,24 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ ...base, AUTH_CODE_TTL_SEC: "61" })).toThrow();
   });
 
+  it("parses advertised metadata sets, defaulting to the FAPI2 SP profile", () => {
+    const c = loadConfig(base);
+    expect(c.metadata.scopesSupported).toEqual(["openid", "profile"]);
+    expect(c.metadata.clientAuthSigningAlgs).toEqual(["ES256", "PS256", "EdDSA"]);
+    const custom = loadConfig({ ...base, METADATA_SCOPES_SUPPORTED: "openid ,profile, email" });
+    expect(custom.metadata.scopesSupported).toEqual(["openid", "profile", "email"]);
+  });
+
+  it("requires 'openid' in the advertised scopes [OIDC Core §3.1.2.1]", () => {
+    expect(() => loadConfig({ ...base, METADATA_SCOPES_SUPPORTED: "profile,email" })).toThrow(/openid/);
+  });
+
+  it("rejects non-FAPI2 signing algs in advertised sets [FAPI2 5.4.1]", () => {
+    expect(() => loadConfig({ ...base, METADATA_DPOP_SIGNING_ALGS: "RS256" })).toThrow(/FAPI2/);
+    expect(() => loadConfig({ ...base, METADATA_CLIENT_AUTH_SIGNING_ALGS: "ES256,none" })).toThrow(/FAPI2/);
+    expect(() => loadConfig({ ...base, METADATA_DPOP_SIGNING_ALGS: "" })).toThrow(/at least one/);
+  });
+
   it("rejects PAR TTLs of 600s or more [FAPI2 5.3.2.2(12)]", () => {
     expect(() => loadConfig({ ...base, PAR_TTL_SEC: "600" })).toThrow();
   });

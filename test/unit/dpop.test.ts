@@ -31,6 +31,20 @@ describe("verifyDpopProof", () => {
     expect(jkt).toBe(dpop.jkt);
   });
 
+  it("enforces the configured DPoP signing algs so advertised == accepted [FAPI2 5.4.1]", async () => {
+    // Narrow the accepted set to PS256; an ES256 proof must now be rejected
+    // (proves the metadata set is enforcement-bearing, not advertisement-only).
+    const narrowed = loadConfig({
+      STORAGE: "memory",
+      ISSUER: "https://as.example.com",
+      METADATA_DPOP_SIGNING_ALGS: "PS256",
+    });
+    const dpop = await createDpopKey(); // ES256
+    const proof = await dpop.proof({ htm: "POST", htu: HTU });
+    const err = await expectDpopError(verifyDpopProof(proof, ctx({ config: narrowed })));
+    expect(err.error).toBe("invalid_dpop_proof");
+  });
+
   it("rejects multiple DPoP headers [RFC9449 §4.3 step 1]", async () => {
     const dpop = await createDpopKey();
     const proof = await dpop.proof({ htm: "POST", htu: HTU });

@@ -17,7 +17,7 @@ import {
 } from "jose";
 import type { AppConfig } from "../config.js";
 import type { Storage } from "../db/repositories/types.js";
-import { FAPI2_JWS_ALGS } from "../crypto/jws.js";
+import { acceptedJwsAlgs } from "../crypto/jws.js";
 import { invalidDpopProof, useDpopNonce } from "./errors.js";
 
 export interface DpopContext {
@@ -81,7 +81,10 @@ export async function verifyDpopProof(
   if (header.typ !== "dpop+jwt") {
     throw invalidDpopProof("DPoP proof typ must be dpop+jwt [RFC9449 §4.2, §11.5]");
   }
-  if (!header.alg || !(FAPI2_JWS_ALGS as readonly string[]).includes(header.alg)) {
+  // Accept only the DPoP signing algs the AS advertises
+  // (dpop_signing_alg_values_supported), narrowed to the FAPI2 ceiling.
+  const allowedAlgs = acceptedJwsAlgs(ctx.config.metadata.dpopSigningAlgs);
+  if (!header.alg || !allowedAlgs.includes(header.alg)) {
     throw invalidDpopProof(`DPoP proof alg not allowed: ${String(header.alg)} [FAPI2 5.4.1]`);
   }
   const jwk = header.jwk as (JWK & { d?: string }) | undefined;
@@ -96,7 +99,7 @@ export async function verifyDpopProof(
   let payload: Record<string, unknown>;
   try {
     const verified = await jwtVerify(proof, EmbeddedJWK, {
-      algorithms: [...FAPI2_JWS_ALGS],
+      algorithms: allowedAlgs,
       clockTolerance: 10 ** 10, // iat handled below with the profile window
     });
     payload = verified.payload as Record<string, unknown>;
