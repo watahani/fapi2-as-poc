@@ -72,4 +72,25 @@ describe("buildMetadata", () => {
       if (Array.isArray(value)) expect(value.length).toBeGreaterThan(0);
     }
   });
+
+  it("defaults preserve the current FAPI2 SP profile shape (behaviour-preserving)", () => {
+    expect(md.scopes_supported).toEqual(["openid", "profile"]);
+    expect(md.subject_types_supported).toEqual(["public"]);
+    expect(md.id_token_signing_alg_values_supported).toEqual(["ES256"]);
+    expect(md.dpop_signing_alg_values_supported).toEqual(["ES256", "PS256", "EdDSA"]);
+    expect(md.token_endpoint_auth_signing_alg_values_supported).toEqual(["ES256", "PS256", "EdDSA"]);
+    expect(md.claims_supported).toEqual(["sub", "iss", "aud", "exp", "iat", "auth_time", "nonce"]);
+  });
+
+  it("is driven by config.metadata so operators can widen sets within FAPI2", () => {
+    const custom = loadConfig({
+      STORAGE: "memory",
+      ISSUER: "https://as.example.com",
+      METADATA_SCOPES_SUPPORTED: "openid, profile, email",
+      METADATA_DPOP_SIGNING_ALGS: "ES256,PS256",
+    });
+    const cmd = buildMetadata(custom);
+    expect(cmd.scopes_supported).toEqual(["openid", "profile", "email"]);
+    expect(cmd.dpop_signing_alg_values_supported).toEqual(["ES256", "PS256"]);
+  });
 });

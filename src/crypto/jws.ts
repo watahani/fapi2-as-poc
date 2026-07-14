@@ -71,28 +71,39 @@ function isJwksUnavailable(err: unknown): boolean {
   return typeof code !== "string" || !code.startsWith("ERR_JW");
 }
 
+/** Intersect a requested alg set with the FAPI2 ceiling so the accepted set is
+ * never wider than PS256/ES256/EdDSA regardless of caller input; empty/absent
+ * falls back to the full ceiling. */
+export function acceptedJwsAlgs(requested?: readonly string[]): string[] {
+  const ceiling = FAPI2_JWS_ALGS as readonly string[];
+  const narrowed = (requested ?? ceiling).filter((a) => ceiling.includes(a));
+  return narrowed.length > 0 ? narrowed : [...ceiling];
+}
+
 /**
- * Verify a compact JWS against a key resolver, restricted to FAPI2 algs
- * (rejects `none`/HS* by construction). Claim validation is left OFF here
- * (clockTolerance etc. are domain decisions).
+ * Verify a compact JWS against a key resolver, restricted to the accepted alg
+ * set (`opts.algs` narrowed to the FAPI2 ceiling; rejects `none`/HS* by
+ * construction). Claim validation is left OFF here (clockTolerance etc. are
+ * domain decisions).
  */
 export async function verifyJws(
   token: string,
   keys: KeyResolver,
-  opts: { typ?: string } = {},
+  opts: { typ?: string; algs?: readonly string[] } = {},
 ): Promise<VerifiedJws> {
+  const allowed = acceptedJwsAlgs(opts.algs);
   let header;
   try {
     header = decodeProtectedHeader(token);
   } catch {
     throw new JwsVerificationError("malformed JWT");
   }
-  if (!header.alg || !(FAPI2_JWS_ALGS as readonly string[]).includes(header.alg)) {
+  if (!header.alg || !allowed.includes(header.alg)) {
     throw new JwsVerificationError(`JWS alg not allowed: ${String(header.alg)} [FAPI2 5.4.1]`);
   }
   try {
     const { payload, protectedHeader } = await jwtVerify(token, keys, {
-      algorithms: [...FAPI2_JWS_ALGS],
+      algorithms: allowed,
       ...(opts.typ ? { typ: opts.typ } : {}),
       // Claims are validated in src/domain with the profile's skew rules
       // (large-but-sane tolerance disables jose's exp/nbf check without

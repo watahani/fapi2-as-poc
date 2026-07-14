@@ -118,6 +118,9 @@ export async function authenticateClient(
     ({ payload: claims } = await verifyJws(
       assertionStr,
       clientKeyResolver(clientJwksSource(client)),
+      // Accept only the client-assertion signing algs the AS advertises
+      // (token_endpoint_auth_signing_alg_values_supported), within FAPI2.
+      { algs: deps.config.metadata.clientAuthSigningAlgs },
     ));
   } catch (err) {
     if (err instanceof JwksUnavailableError) {
